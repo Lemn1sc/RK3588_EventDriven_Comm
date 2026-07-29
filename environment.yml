@@ -1,0 +1,12 @@
+# conda 一键建环境（含 pip 依赖）
+#   conda env create -f environment.yml
+#   conda activate rk
+# 之后用 python scripts/check_env.py 自检。
+name: rk
+channels:
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+      - -r requirements.txt

@@ -1,0 +1,21 @@
+# ── 算法环境依赖（PC / 无板子阶段）─────────────────────────────
+# 安装：先建 conda 环境，再 pip install -r requirements.txt
+#   conda create -n rk python=3.10 -y && conda activate rk
+#   pip install -r requirements.txt
+#
+# torch 走 CUDA 12.1 官方源（适配 RTX 2050 / Ampere）。
+# 若机器无 NVIDIA 显卡，删掉下面这行 --extra-index-url，会自动装 CPU 版。
+--extra-index-url https://download.pytorch.org/whl/cu121
+
+torch==2.3.1
+torchvision==0.18.1
+
+# 检测 / 姿态模型（自动下载 yolov8n.pt / yolov8n-pose.pt）
+ultralytics==8.2.103
+
+# 通用
+opencv-python==4.10.0.84
+numpy==1.26.4
+matplotlib==3.9.2
+
+# rknn-toolkit2 仅 Linux（WSL2），T0.9 才用，这里不列，避免 Windows 安装失败。
