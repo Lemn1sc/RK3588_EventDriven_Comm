@@ -1,6 +1,6 @@
 # 项目进度记录
 
-> 最后更新: 2026-07-29
+> 最后更新: 2026-08-27
 
 ## 仓库分支
 
@@ -37,6 +37,18 @@
 - [x] `scripts/check_event_vector.py` — 纯 numpy 契约验证（不依赖 ultralytics/torch）
 - [x] `scripts/check_event_vector_real.py` — 真实模型输出验证
 
+### T0.7 接入真实数据集（首测）✅
+
+- [x] 数据就位：`data/datasets/URFD/`（30 跌倒 + 40 日常，GitCode 镜像下载，官方站/GitHub 国内不可达）
+- [x] `scripts/detect_fall_video.py` — 视频级联检测（检测→事件向量→疑似才调姿态；`--always-pose` 全帧）
+- [x] `scripts/bench_pose_fall.py` — 70 段全帧姿态批量基准
+- [x] `docs/08_真实数据集首测_T0.7.md` — 首测记录（两个关键发现 + 3 个 bug 复盘）
+
+**实测结论**（详见 docs/08）：
+- 单帧高宽比触发器在 URFD 低位视角下漏检 ~90%（仅 3/30 达 severity≥0.5，8 段全程检不出人）
+- 姿态判定单帧：67% 检出 / 20% 误报，fall 与 adl 占比分布重叠、无干净阈值
+- → 触发策略留给 GRU（T0.6）；T0.4 固定规则需改时序触发
+
 ### GRU 控制端 ✅（gru 分支）
 
 - [x] `event_chain_demo.py` — 事件链演示
@@ -66,9 +78,10 @@
 
 - [ ] `src/controller/` — GRUOffloadController 定义 + 仿真数据监督训练
 
-### T0.7 接入真实数据集
+### T0.7 接入真实数据集（数据与首测已完成，见"已完成"）
 
-- [ ] `data/datasets/` — UR Fall Detection / Le2i Fall Detection
+- [x] `data/datasets/URFD/` — UR Fall Detection 一号摄像头视频已就位并跑通首测
+- [ ] （可选）Le2i Fall Detection（含 Office 场景，作财务室代理；数据源见 docs/05、docs/08）
 
 ### T0.8 对比实验框架
 
@@ -87,3 +100,5 @@
 3. **severity = 置信度 × 高宽比异常度** — 低置信自动打折，抑制鬼影框误报
 4. **纯高宽比的局限** — 无法区分真跌倒与画面截断，需 GRU 利用时序区分
 5. **远端 Pose 不适合 RL** — 分类问题用监督学习；GRU 控制端适合 RL 升级
+6. **低位视角下纯高宽比连"真跌倒"都不触发** — URFD cam0 实测仅 3/30 段达 severity≥0.5（docs/08）
+7. **单帧姿态几何无法分开跌倒与日常躺卧/蹲坐** — 实测 67% 检出 / 20% 误报，必须靠时序（docs/08）
