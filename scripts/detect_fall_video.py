@@ -40,12 +40,22 @@ PT_DIR = ROOT / "models" / "pt"
 OUT_ROOT = ROOT / "data" / "recordings" / "detect_fall"
 
 sys.path.insert(0, str(ROOT / "src"))
-from common.event_vector import EventType, event_from_result  # noqa: E402
+from common.event_vector import ASPECT_LYING, EventType, event_from_result  # noqa: E402
 from ultralytics import YOLO  # noqa: E402
 
 CONF_THRES = 0.25       # 检测置信度阈值（与 src/common/event_vector.py 默认一致）
 KP_CONF = 0.3           # 姿态关键点可见度阈值，低于此值弃用（docs/07 强调防 (0,0) 污染）
-POSE_TRIGGER_SEV = 0.5  # severity ≥ 该值 → SUSPECTED → 调姿态（与契约 SEVERITY_SUSPECT 一致）
+
+# 跌倒判定的几何阈值。原来散在函数体里（且被 bench 的 docstring 复述过一遍），
+# 提上来避免三处各自漂移。框高宽比阈值不在这里另设 —— 直接用契约常量 ASPECT_LYING。
+TORSO_TILT_MAX_DEG = 45.0   # 肩中点↔髋中点连线与垂直方向夹角 > 该值 → 疑似跌倒
+HIP_ANKLE_MIN_RATIO = 0.3   # 髋↔踝高差/框高 < 该值 → 疑似跌倒（站立≈0.5，躺平≈0）
+
+# 逐帧日志的字段与顺序（CSV 表头）。空视频也要写出表头，所以必须与 rows 解耦。
+ROW_FIELDS = ["frame", "has_event", "event_type", "confidence", "severity",
+              "bbox_x1", "bbox_y1", "bbox_x2", "bbox_y2",
+              "pose_invoked", "aspect_ratio",
+              "torso_angle", "hip_ankle_ratio", "fall", "reason"]
 
 # COCO 17 关键点索引（yolov8-pose 固定顺序，见 docs/07）
 I_SHO_L, I_SHO_R = 5, 6     # 左右肩
@@ -90,14 +100,18 @@ def fall_geometry(kpts_xy, kpts_conf, bbox_wh):
 
 
 def judge(event, geom, aspect_ratio):
-    """综合框高宽比 + 姿态几何量给最终跌倒判定。返回 (是否跌倒, 命中线索串)。"""
+    """综合框高宽比 + 姿态几何量给最终跌倒判定。返回 (是否跌倒, 命中线索串)。
+
+    注意：本函数含框高宽比线索（第一条），所以 `bench_pose_fall` 用本函数得到的
+    并不是"纯姿态"结果。口径问题留待后续拆分，此处只把阈值常量化、行为不变。
+    """
     reasons = []
-    if event.event_type == EventType.SUSPECTED and aspect_ratio < 0.7:
+    if event.event_type == EventType.SUSPECTED and aspect_ratio < ASPECT_LYING:
         reasons.append(f"bbox_hw={aspect_ratio:.2f}")
     if geom is not None:
-        if geom["torso_angle"] > 45:
+        if geom["torso_angle"] > TORSO_TILT_MAX_DEG:
             reasons.append(f"tilt={geom['torso_angle']:.0f}deg")
-        if geom["hip_ankle_ratio"] is not None and geom["hip_ankle_ratio"] < 0.3:
+        if geom["hip_ankle_ratio"] is not None and geom["hip_ankle_ratio"] < HIP_ANKLE_MIN_RATIO:
             reasons.append(f"hipankle={geom['hip_ankle_ratio']:.2f}")
     return bool(reasons), "+".join(reasons)
 
@@ -128,13 +142,21 @@ def draw_pose(img, kxy, kconf):
             cv2.circle(img, (int(x), int(y)), 3, (0, 0, 255), -1)
 
 
+def empty_row() -> dict:
+    """一帧日志行的初始值（字段顺序与 ROW_FIELDS 一致）。"""
+    return {"frame": 0, "has_event": 0, "event_type": 0, "confidence": 0.0, "severity": 0.0,
+            "bbox_x1": 0, "bbox_y1": 0, "bbox_x2": 0, "bbox_y2": 0,
+            "pose_invoked": 0, "aspect_ratio": float("nan"),
+            "torso_angle": "", "hip_ankle_ratio": "", "fall": 0, "reason": ""}
+
+
 def process_frame(frame, det_model, pose_model, always_pose):
     """跑一帧的级联：检测 → 事件向量 → (疑似)姿态 → 判定 → 标注。返回 (标注图, 日志行 dict)。"""
     h, w = frame.shape[:2]
-    row = {"frame": 0, "has_event": 0, "event_type": 0, "confidence": 0.0, "severity": 0.0,
-           "bbox_x1": 0, "bbox_y1": 0, "bbox_x2": 0, "bbox_y2": 0,
-           "pose_invoked": 0, "aspect_ratio": float("nan"),
-           "torso_angle": "", "hip_ankle_ratio": "", "fall": 0, "reason": ""}
+    row = empty_row()
+    # 无人帧时 pix 也必须已定义：下面的姿态分支会用到它（旧版靠三元表达式短路兜住，
+    # 能跑但读代码的人得推理一遍才敢确认不炸）。
+    pix = (0, 0, 0, 0)
 
     r = det_model(frame, verbose=False)[0]
     ev = event_from_result(r, conf_thres=CONF_THRES)
@@ -179,9 +201,14 @@ def process_frame(frame, det_model, pose_model, always_pose):
     return frame, row
 
 
-def write_csv_rows(path, rows):
+def write_csv_rows(path, rows, fieldnames=None):
+    """写逐帧 CSV。
+
+    表头取自 ROW_FIELDS 而非 rows[0].keys()：视频一帧都没读出来时 rows 为空，
+    旧写法会 IndexError；现在会写出一份只有表头的「0 帧」证据。
+    """
     with open(path, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        w = csv.DictWriter(f, fieldnames=fieldnames or ROW_FIELDS)
         w.writeheader()
         w.writerows(rows)
 
