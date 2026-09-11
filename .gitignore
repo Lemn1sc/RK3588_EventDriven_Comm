@@ -6,8 +6,14 @@ models/rknn/*
 data/datasets/*
 data/recordings/*
 !data/**/.gitkeep
+# 实验结果：小的汇总结果（json/csv/md）入库，让文档里的数字可核对；
+# 大文件（图、日志）仍忽略。注意 git 的限制：不能重新包含一个被排除目录里的文件，
+# 所以结果文件要平铺在本目录下，不要建子目录。
 experiments/results/*
 !experiments/results/.gitkeep
+!experiments/results/*.json
+!experiments/results/*.csv
+!experiments/results/*.md
 
 # Python
 __pycache__/

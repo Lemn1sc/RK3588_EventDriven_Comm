@@ -18,7 +18,9 @@
     python scripts/train_gru_fall.py --recompute # 强制重新提取特征
 """
 import argparse
+import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -64,6 +66,10 @@ SF_RATIO_THRES = 0.2    # 单帧基线：跌倒帧占比 ≥ 该值判该视频�
 TEST_FRAC = 0.25        # 测试视频占比（按视频划分，防同视频窗口泄漏）
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+# 指标落盘目录。experiments/results/ 在 .gitignore 里被放行了 json/csv ——
+# 文档里的每个数字都该能在这里找到对应产物，否则半年后无人能核对。
+RESULTS_DIR = ROOT / "experiments" / "results"
 
 
 # ────────────────────────── 1. 特征提取（两种模式）──────────────────────────
@@ -332,6 +338,47 @@ def run_mode(mode: str, data: dict, seed: int = SEED, verbose: bool = True) -> d
     return out
 
 
+def config_snapshot() -> dict:
+    """本次实验的全部可调量。写进 json，避免"改了配置忘了记录"。"""
+    return {
+        "window": WINDOW, "stride": STRIDE, "hidden": HIDDEN, "layers": LAYERS,
+        "epochs": EPOCHS, "batch": BATCH, "lr": LR, "seed": SEED,
+        "test_frac": TEST_FRAC, "severity_suspect": SEVERITY_SUSPECT,
+        "sf_ratio_thres": SF_RATIO_THRES, "aggs": list(DEFAULT_AGGS),
+    }
+
+
+def env_snapshot() -> dict:
+    """环境指纹。同一份代码在不同 torch/numpy 下可能给出不同数值，必须记录。"""
+    import platform
+    import subprocess
+
+    def _git(*args):
+        try:
+            return subprocess.run(["git", *args], cwd=ROOT, capture_output=True,
+                                  text=True, timeout=5).stdout.strip()
+        except Exception:  # noqa: BLE001  拿不到就不记，不让它挡住实验
+            return None
+
+    import ultralytics
+    return {
+        "python": platform.python_version(),
+        "numpy": np.__version__,
+        "torch": torch.__version__,
+        "ultralytics": ultralytics.__version__,
+        "cuda": torch.cuda.is_available(),
+        "device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu",
+        "git_commit": _git("rev-parse", "HEAD"),
+        "git_branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
+        "git_dirty": bool(_git("status", "--porcelain")),
+    }
+
+
+def write_metrics_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def mstd(mlist, key, scale=100.0, fmt="{:.0f}±{:.0f}"):
     """mean±std。显式接收列表（旧版用闭包读循环变量 mode，多特征集扩展必踩坑）。"""
     a = np.array([r[key] for r in mlist], dtype=np.float64) * scale
@@ -346,6 +393,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--recompute", action="store_true", help="强制重新提取特征")
     ap.add_argument("--seeds", type=int, default=5, help="随机 seed 数（每个 seed 重新划分+重训）")
+    ap.add_argument("--out-json", type=Path, default=RESULTS_DIR / "metrics_latest.json",
+                    help="指标落盘路径（默认 experiments/results/metrics_latest.json）")
     args = ap.parse_args()
     seeds = args.seeds
 
@@ -387,6 +436,29 @@ def main():
     print("若 det 的 GRU 稳定接近/超过 pose，说明边缘端只靠检测特征+时序就够，可省去姿态卸载。")
     print("AUC 按并列取平均秩计算（common.metrics），单帧基线分数存在大量并列，"
           "旧的不稳定排序实现会给出偏高的任意值。")
+
+    def _summary(mlist):
+        return {k: {"mean": float(np.mean([r[k] for r in mlist])),
+                    "std": float(np.std([r[k] for r in mlist]))}
+                for k in mlist[0]}
+
+    payload = {
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "script": "scripts/train_gru_fall.py",
+        "env": env_snapshot(),
+        "config": config_snapshot(),
+        "seeds": seeds,
+        "featset": {m: {"dim": FEAT_DIM[m], "single_frame_rule": SF_RULE[m],
+                        "cache": str(CACHE[m].relative_to(ROOT))} for m in metrics},
+        "per_seed": metrics,
+        "summary": {m: _summary(metrics[m]) for m in metrics},
+    }
+    write_metrics_json(args.out_json, payload)
+    try:  # 用户可能传相对路径，也可能传到仓库外
+        shown = args.out_json.resolve().relative_to(ROOT)
+    except ValueError:
+        shown = args.out_json
+    print(f"\n指标已落盘: {shown}")
 
 
 if __name__ == "__main__":

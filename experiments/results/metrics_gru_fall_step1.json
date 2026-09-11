@@ -1,0 +1,348 @@
+{
+  "generated_at": "2026-09-11T08:13:42+00:00",
+  "script": "scripts/train_gru_fall.py",
+  "env": {
+    "python": "3.10.20",
+    "numpy": "1.26.4",
+    "torch": "2.3.1+cu121",
+    "ultralytics": "8.2.103",
+    "cuda": true,
+    "device": "NVIDIA GeForce RTX 2050",
+    "git_commit": "12cdb8cb4700adfcda984fff83cd8553f5fb6940",
+    "git_branch": "event-refactor",
+    "git_dirty": true
+  },
+  "config": {
+    "window": 30,
+    "stride": 10,
+    "hidden": 32,
+    "layers": 1,
+    "epochs": 40,
+    "batch": 64,
+    "lr": 0.001,
+    "seed": 0,
+    "test_frac": 0.25,
+    "severity_suspect": 0.5,
+    "sf_ratio_thres": 0.2,
+    "aggs": [
+      "max",
+      "mean",
+      "top3mean"
+    ]
+  },
+  "seeds": 5,
+  "featset": {
+    "det": {
+      "dim": 4,
+      "single_frame_rule": "severity>=0.5",
+      "cache": "data\\recordings\\detect_fall\\gru_features_det.npz"
+    },
+    "pose": {
+      "dim": 6,
+      "single_frame_rule": "judge(框+姿态融合)",
+      "cache": "data\\recordings\\detect_fall\\gru_features_pose.npz"
+    }
+  },
+  "per_seed": {
+    "det": [
+      {
+        "auc_sf": 0.5625,
+        "auc_gs": 1.0,
+        "tpr0_sf": 0.125,
+        "tpr0_gs": 1.0,
+        "tpr1_gs": 1.0,
+        "tpr1_sf": 0.125,
+        "ties_max_group": 17,
+        "n_win_min": 4,
+        "n_win_max": 33,
+        "auc_gs_max": 1.0,
+        "tpr0_gs_max": 1.0,
+        "auc_gs_mean": 1.0,
+        "tpr0_gs_mean": 1.0,
+        "auc_gs_top3mean": 1.0,
+        "tpr0_gs_top3mean": 1.0
+      },
+      {
+        "auc_sf": 0.5625,
+        "auc_gs": 0.95,
+        "tpr0_sf": 0.125,
+        "tpr0_gs": 0.75,
+        "tpr1_gs": 0.875,
+        "tpr1_sf": 0.125,
+        "ties_max_group": 17,
+        "n_win_min": 3,
+        "n_win_max": 32,
+        "auc_gs_max": 0.95,
+        "tpr0_gs_max": 0.75,
+        "auc_gs_mean": 0.9875,
+        "tpr0_gs_mean": 0.875,
+        "auc_gs_top3mean": 0.95,
+        "tpr0_gs_top3mean": 0.75
+      },
+      {
+        "auc_sf": 0.5625,
+        "auc_gs": 0.8,
+        "tpr0_sf": 0.125,
+        "tpr0_gs": 0.5,
+        "tpr1_gs": 0.625,
+        "tpr1_sf": 0.125,
+        "ties_max_group": 17,
+        "n_win_min": 3,
+        "n_win_max": 38,
+        "auc_gs_max": 0.8,
+        "tpr0_gs_max": 0.5,
+        "auc_gs_mean": 0.8875,
+        "tpr0_gs_mean": 0.75,
+        "auc_gs_top3mean": 0.7250000000000001,
+        "tpr0_gs_top3mean": 0.375
+      },
+      {
+        "auc_sf": 0.5,
+        "auc_gs": 0.8500000000000001,
+        "tpr0_sf": 0.0,
+        "tpr0_gs": 0.75,
+        "tpr1_gs": 0.75,
+        "tpr1_sf": 0.0,
+        "ties_max_group": 18,
+        "n_win_min": 3,
+        "n_win_max": 32,
+        "auc_gs_max": 0.8500000000000001,
+        "tpr0_gs_max": 0.75,
+        "auc_gs_mean": 0.925,
+        "tpr0_gs_mean": 0.75,
+        "auc_gs_top3mean": 0.8875000000000001,
+        "tpr0_gs_top3mean": 0.625
+      },
+      {
+        "auc_sf": 0.5,
+        "auc_gs": 0.8375,
+        "tpr0_sf": 0.0,
+        "tpr0_gs": 0.375,
+        "tpr1_gs": 0.75,
+        "tpr1_sf": 0.0,
+        "ties_max_group": 18,
+        "n_win_min": 3,
+        "n_win_max": 38,
+        "auc_gs_max": 0.8375,
+        "tpr0_gs_max": 0.375,
+        "auc_gs_mean": 0.9625,
+        "tpr0_gs_mean": 0.75,
+        "auc_gs_top3mean": 0.8,
+        "tpr0_gs_top3mean": 0.125
+      }
+    ],
+    "pose": [
+      {
+        "auc_sf": 0.8875000000000001,
+        "auc_gs": 0.9750000000000001,
+        "tpr0_sf": 0.625,
+        "tpr0_gs": 0.75,
+        "tpr1_gs": 1.0,
+        "tpr1_sf": 0.75,
+        "ties_max_group": 1,
+        "n_win_min": 4,
+        "n_win_max": 33,
+        "auc_gs_max": 0.9750000000000001,
+        "tpr0_gs_max": 0.75,
+        "auc_gs_mean": 1.0,
+        "tpr0_gs_mean": 1.0,
+        "auc_gs_top3mean": 0.9875,
+        "tpr0_gs_top3mean": 0.875
+      },
+      {
+        "auc_sf": 0.9125,
+        "auc_gs": 0.8624999999999999,
+        "tpr0_sf": 0.75,
+        "tpr0_gs": 0.5,
+        "tpr1_gs": 0.5,
+        "tpr1_sf": 0.75,
+        "ties_max_group": 2,
+        "n_win_min": 3,
+        "n_win_max": 32,
+        "auc_gs_max": 0.8624999999999999,
+        "tpr0_gs_max": 0.5,
+        "auc_gs_mean": 0.9625,
+        "tpr0_gs_mean": 0.75,
+        "auc_gs_top3mean": 0.8250000000000001,
+        "tpr0_gs_top3mean": 0.375
+      },
+      {
+        "auc_sf": 0.9375,
+        "auc_gs": 0.8999999999999999,
+        "tpr0_sf": 0.75,
+        "tpr0_gs": 0.625,
+        "tpr1_gs": 0.875,
+        "tpr1_sf": 0.75,
+        "ties_max_group": 2,
+        "n_win_min": 3,
+        "n_win_max": 38,
+        "auc_gs_max": 0.8999999999999999,
+        "tpr0_gs_max": 0.625,
+        "auc_gs_mean": 0.9375,
+        "tpr0_gs_mean": 0.875,
+        "auc_gs_top3mean": 0.8999999999999999,
+        "tpr0_gs_top3mean": 0.5
+      },
+      {
+        "auc_sf": 0.7374999999999999,
+        "auc_gs": 0.775,
+        "tpr0_sf": 0.375,
+        "tpr0_gs": 0.5,
+        "tpr1_gs": 0.5,
+        "tpr1_sf": 0.625,
+        "ties_max_group": 3,
+        "n_win_min": 3,
+        "n_win_max": 32,
+        "auc_gs_max": 0.775,
+        "tpr0_gs_max": 0.5,
+        "auc_gs_mean": 0.8125,
+        "tpr0_gs_mean": 0.5,
+        "auc_gs_top3mean": 0.75,
+        "tpr0_gs_top3mean": 0.5
+      },
+      {
+        "auc_sf": 0.825,
+        "auc_gs": 0.9125,
+        "tpr0_sf": 0.75,
+        "tpr0_gs": 0.75,
+        "tpr1_gs": 0.75,
+        "tpr1_sf": 0.75,
+        "ties_max_group": 1,
+        "n_win_min": 3,
+        "n_win_max": 38,
+        "auc_gs_max": 0.9125,
+        "tpr0_gs_max": 0.75,
+        "auc_gs_mean": 0.9625,
+        "tpr0_gs_mean": 0.75,
+        "auc_gs_top3mean": 0.8999999999999999,
+        "tpr0_gs_top3mean": 0.625
+      }
+    ]
+  },
+  "summary": {
+    "det": {
+      "auc_sf": {
+        "mean": 0.5375,
+        "std": 0.03061862178478973
+      },
+      "auc_gs": {
+        "mean": 0.8875,
+        "std": 0.07499999999999997
+      },
+      "tpr0_sf": {
+        "mean": 0.075,
+        "std": 0.06123724356957946
+      },
+      "tpr0_gs": {
+        "mean": 0.675,
+        "std": 0.21794494717703367
+      },
+      "tpr1_gs": {
+        "mean": 0.8,
+        "std": 0.1274754878398196
+      },
+      "tpr1_sf": {
+        "mean": 0.075,
+        "std": 0.06123724356957946
+      },
+      "ties_max_group": {
+        "mean": 17.4,
+        "std": 0.4898979485566356
+      },
+      "n_win_min": {
+        "mean": 3.2,
+        "std": 0.39999999999999997
+      },
+      "n_win_max": {
+        "mean": 34.6,
+        "std": 2.8000000000000003
+      },
+      "auc_gs_max": {
+        "mean": 0.8875,
+        "std": 0.07499999999999997
+      },
+      "tpr0_gs_max": {
+        "mean": 0.675,
+        "std": 0.21794494717703367
+      },
+      "auc_gs_mean": {
+        "mean": 0.9525,
+        "std": 0.041382363393117134
+      },
+      "tpr0_gs_mean": {
+        "mean": 0.825,
+        "std": 0.09999999999999999
+      },
+      "auc_gs_top3mean": {
+        "mean": 0.8724999999999999,
+        "std": 0.09949874371066195
+      },
+      "tpr0_gs_top3mean": {
+        "mean": 0.575,
+        "std": 0.3020761493398643
+      }
+    },
+    "pose": {
+      "auc_sf": {
+        "mean": 0.86,
+        "std": 0.07176350047203665
+      },
+      "auc_gs": {
+        "mean": 0.885,
+        "std": 0.06585969936159747
+      },
+      "tpr0_sf": {
+        "mean": 0.65,
+        "std": 0.1457737973711325
+      },
+      "tpr0_gs": {
+        "mean": 0.625,
+        "std": 0.11180339887498948
+      },
+      "tpr1_gs": {
+        "mean": 0.725,
+        "std": 0.19999999999999998
+      },
+      "tpr1_sf": {
+        "mean": 0.725,
+        "std": 0.049999999999999996
+      },
+      "ties_max_group": {
+        "mean": 1.8,
+        "std": 0.7483314773547883
+      },
+      "n_win_min": {
+        "mean": 3.2,
+        "std": 0.39999999999999997
+      },
+      "n_win_max": {
+        "mean": 34.6,
+        "std": 2.8000000000000003
+      },
+      "auc_gs_max": {
+        "mean": 0.885,
+        "std": 0.06585969936159747
+      },
+      "tpr0_gs_max": {
+        "mean": 0.625,
+        "std": 0.11180339887498948
+      },
+      "auc_gs_mean": {
+        "mean": 0.9349999999999999,
+        "std": 0.06442049363362563
+      },
+      "tpr0_gs_mean": {
+        "mean": 0.775,
+        "std": 0.16583123951777
+      },
+      "auc_gs_top3mean": {
+        "mean": 0.8724999999999999,
+        "std": 0.07999999999999999
+      },
+      "tpr0_gs_top3mean": {
+        "mean": 0.575,
+        "std": 0.1695582495781317
+      }
+    }
+  }
+}
