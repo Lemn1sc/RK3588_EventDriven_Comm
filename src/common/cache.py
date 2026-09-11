@@ -37,7 +37,7 @@ from pathlib import Path
 import numpy as np
 
 __all__ = ["CACHE_FORMAT", "SPEC_KEY", "META_KEY", "spec_sha1", "save_npz",
-           "load_npz", "read_meta", "spec_diff"]
+           "load_npz", "read_meta", "spec_diff", "check_dims"]
 
 CACHE_FORMAT = 1
 SPEC_KEY = "__spec_sha1__"
@@ -85,6 +85,22 @@ def read_meta(path) -> dict | None:
     return json.loads(str(npz[META_KEY][0]))
 
 
+def check_dims(npz, keys, expect_dim: int, what: str = "缓存", path=None) -> None:
+    """第二道保险：即使指纹一致，形状不对也立刻停下。
+
+    指纹防的是"同一套代码被改动"，形状防的是"文件被手工拼装/裁剪"。
+    """
+    for k in keys:
+        if k not in npz.files:
+            raise SystemExit(f"{what}缺少条目 {k}：{path}")
+        arr = npz[k]
+        if arr.ndim != 2 or arr.shape[1] != expect_dim:
+            raise SystemExit(
+                f"{what}里 {k} 的形状是 {arr.shape}，期望 (帧数, {expect_dim})：{path}\n"
+                f"  → 指纹一致但形状不符，说明文件不是由当前特征集生成的。"
+            )
+
+
 def load_npz(path, expect_spec: dict, item_keys=None, expect_dim: int | None = None,
              what: str = "缓存"):
     """严格加载带版本信息的 npz。
@@ -126,13 +142,5 @@ def load_npz(path, expect_spec: dict, item_keys=None, expect_dim: int | None = N
         )
 
     if item_keys is not None and expect_dim is not None:
-        for k in item_keys:
-            if k not in npz.files:
-                raise SystemExit(f"{what}缺少条目 {k}：{path}")
-            arr = npz[k]
-            if arr.ndim != 2 or arr.shape[1] != expect_dim:
-                raise SystemExit(
-                    f"{what}里 {k} 的形状是 {arr.shape}，期望 (帧数, {expect_dim})：{path}\n"
-                    f"  → 第二道保险：即使指纹碰巧一致，形状不对也立刻停下。"
-                )
+        check_dims(npz, item_keys, expect_dim, what=what, path=path)
     return npz, meta

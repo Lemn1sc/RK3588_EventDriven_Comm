@@ -44,12 +44,39 @@ from common.event_vector import event_from_result  # noqa: E402
 from common.metrics import (  # noqa: E402
     DEFAULT_AGGS, agg_scores, format_ties, roc_auc, roc_curve, ties_report, tpr_at_fpr,
 )
+from common.cache import (  # noqa: E402
+    META_KEY, SPEC_KEY, check_dims, load_npz, save_npz, spec_sha1,
+)
 
 DATA_DIR = ROOT / "data" / "datasets" / "URFD"
 CACHE_DIR = ROOT / "data" / "recordings" / "detect_fall"
-CACHE = {"det": CACHE_DIR / "gru_features_det.npz", "pose": CACHE_DIR / "gru_features_pose.npz"}
-SAVE_MODEL = {"det": ROOT / "models" / "pt" / "gru_fall_det.pt", "pose": ROOT / "models" / "pt" / "gru_fall_pose.pt"}
+
+# 特征集名带版本，缓存与权重都用它命名 —— 新旧版本并存、互不覆盖，
+# 所以切回旧特征集不需要改代码，也不会把旧产物冲掉。
+FEATSET = {"det": "det.v1", "pose": "pose.v1"}
+CACHE = {m: CACHE_DIR / f"feats_{v}.npz" for m, v in FEATSET.items()}
+SAVE_MODEL = {m: ROOT / "models" / "pt" / f"gru_fall_{m}.{FEATSET[m].split('.')[-1]}.pt"
+              for m in FEATSET}
 FEAT_DIM = {"det": 4, "pose": 6}
+
+# 特征规格：指纹的输入。凡是会影响数值的常数都必须写进来 —— 否则把它们改掉
+# 不会触发缓存失效，而"改常数"恰恰是最容易被悄悄改坏的一类改动。
+FEAT_SPEC = {
+    "det": {
+        "featset": "det.v1", "dim": 4, "source": "yolov8n 检测 → event_vector",
+        "names": ["has_event", "confidence", "severity", "aspect_norm"],
+        "conf_clip": [0.0, 1.0], "sev_clip": [0.0, 1.0],
+        "aspect_clip": [0.3, 4.0], "aspect_div": 4.0, "no_event_value": 0.0,
+    },
+    "pose": {
+        "featset": "pose.v1", "dim": 6, "source": "yolov8n-pose 全帧 → judge 行",
+        "names": ["has_event", "confidence", "severity", "aspect_norm",
+                  "torso_tilt_norm", "hip_ankle_ratio"],
+        "conf_clip": [0.0, 1.0], "sev_clip": [0.0, 1.0],
+        "aspect_clip": [0.3, 4.0], "aspect_div": 4.0, "no_event_value": 0.0,
+        "torso_div": 90.0, "hip_ankle_clip": [0.0, 1.0], "hip_ankle_missing": 1.0,
+    },
+}
 
 # ── GRU 超参（简单，够演示）──
 WINDOW = 30          # 每窗口帧数（≈1s）
@@ -169,18 +196,44 @@ def extract_features(mode: str) -> dict:
     return out
 
 
+def item_names(npz) -> list[str]:
+    """缓存里的条目名（排除元数据键与 _sf / _label 后缀键）。"""
+    return sorted(k for k in npz.files
+                  if k not in (SPEC_KEY, META_KEY)
+                  and not k.endswith("_sf") and not k.endswith("_label"))
+
+
 def load_or_extract(mode: str, recompute: bool) -> dict:
+    """取特征：优先读缓存（严格校验版本），否则重新提取。
+
+    读缓存走 common.cache 的三层校验：文件名带特征集身份、内容指纹必须与当前
+    代码一致、形状再兜一道。任何一条不符都报错停下，绝不"兼容读取"。
+    """
     cache = CACHE[mode]
-    if cache.exists() and not recompute:
-        npz = np.load(cache, allow_pickle=True)
-        names = [k for k in npz.files if not k.endswith("_sf") and not k.endswith("_label")]
-        return {k: {"feats": npz[k], "sf": npz[f"{k}_sf"], "label": float(npz[f"{k}_label"][0])}
-                for k in names}
-    print(f"提取特征 [{mode}]（70 段 × 每帧{'检测+姿态' if mode == 'pose' else '仅检测'}）→ {cache}")
+    what = f"[{mode}] 特征缓存"
+
+    if not recompute:
+        npz, _meta = load_npz(cache, FEAT_SPEC[mode], what=what)
+        names = item_names(npz)
+        if not names:
+            raise SystemExit(f"{what}里没有任何视频条目：{rel(cache)}\n"
+                             f"  → 加 --recompute 重新生成")
+        check_dims(npz, names, FEAT_DIM[mode], what=what, path=cache)
+        return {k: {"feats": npz[k], "sf": npz[f"{k}_sf"],
+                    "label": float(npz[f"{k}_label"][0])} for k in names}
+
+    print(f"提取特征 [{mode}]（70 段 × 每帧{'检测+姿态' if mode == 'pose' else '仅检测'}）"
+          f"→ {rel(cache)}")
     data = extract_features(mode)
-    np.savez(cache, **{k: v["feats"] for k, v in data.items()},
-             **{f"{k}_sf": v["sf"] for k, v in data.items()},
-             **{f"{k}_label": np.array([v["label"]]) for k, v in data.items()})
+    if not data:
+        raise SystemExit(f"[{mode}] 未提取到任何视频，检查 {rel(DATA_DIR)} 下的 *.mp4")
+    save_npz(cache, FEAT_SPEC[mode], {
+        **{k: v["feats"] for k, v in data.items()},
+        **{f"{k}_sf": v["sf"] for k, v in data.items()},
+        **{f"{k}_label": np.array([v["label"]]) for k, v in data.items()},
+    }, n_videos=len(data))
+    print(f"  已保存 {len(data)} 段（特征集 {FEATSET[mode]}，"
+          f"指纹 {spec_sha1(FEAT_SPEC[mode])}）")
     return data
 
 
@@ -198,6 +251,14 @@ def make_windows(feats: np.ndarray, label: float):
 
 
 def split_videos(data: dict, seed: int = SEED):
+    """按视频划分训练/测试（防同视频的窗口泄漏到两边）。
+
+    ⚠ 两个返回列表都**显式排序**，这不是洁癖：训练时所有窗口按视频顺序拼接成一个
+    大数组，再由 torch.randperm 打乱成批次。所以视频的排列顺序会改变批次内容、
+    进而改变训练结果 —— 而这以前是隐式的（取决于缓存文件里条目的写入顺序，
+    例如"先 fall 后 adl"还是"先 adl 后 fall"）。同一个人换台机器重跑就可能对不上。
+    显式排序后，结果只取决于数据内容和 seed，与字典/文件的构造顺序无关。
+    """
     rng = np.random.RandomState(seed)
     fall = sorted(k for k, v in data.items() if v["label"] == 1.0)
     adl = sorted(k for k, v in data.items() if v["label"] == 0.0)
@@ -205,8 +266,9 @@ def split_videos(data: dict, seed: int = SEED):
     rng.shuffle(adl)
     n_test_fall = max(1, round(len(fall) * TEST_FRAC))
     n_test_adl = max(1, round(len(adl) * TEST_FRAC))
-    test = fall[:n_test_fall] + adl[:n_test_adl]
-    train = [k for k in data if k not in test]
+    test = sorted(fall[:n_test_fall] + adl[:n_test_adl])
+    test_set = set(test)
+    train = sorted(k for k in data if k not in test_set)
     return train, test
 
 
@@ -250,6 +312,38 @@ def eval_acc(model, x, y):
     with torch.no_grad():
         p = torch.sigmoid(model(torch.tensor(x, device=DEVICE))).cpu().numpy()
     return ((p >= 0.5).astype(int) == y.astype(int)).mean()
+
+
+def save_checkpoint(path, model, mode: str) -> None:
+    """保存权重 + 身份证（特征集名 / 指纹 / 输入维度 / 网络结构）。
+
+    为什么不能只存裸 state_dict：**维度恰好一致时它会静默加载成功**（例如同一
+    维度内调换了特征顺序），模型照跑不报错，只有指纹能拦住。维度不一致时 torch
+    自己会抛 RuntimeError，但信息是 `size mismatch` 这种天书。
+    """
+    torch.save({"state_dict": model.state_dict(),
+                "featset": FEATSET[mode],
+                "feat_spec_sha1": spec_sha1(FEAT_SPEC[mode]),
+                "in_dim": FEAT_DIM[mode],
+                "hidden": HIDDEN, "layers": LAYERS,
+                "window": WINDOW, "stride": STRIDE}, path)
+
+
+def load_checkpoint(path, mode: str):
+    """加载权重并校验身份（供 T0.4 的 edge_node 复用；本轮实验流程也用它做回读校验）。"""
+    ckpt = torch.load(path, map_location="cpu")
+    want = spec_sha1(FEAT_SPEC[mode])
+    if ckpt.get("feat_spec_sha1") != want or ckpt.get("in_dim") != FEAT_DIM[mode]:
+        raise SystemExit(
+            f"权重与当前特征集不匹配：{rel(path)}\n"
+            f"  权重：特征集 {ckpt.get('featset')} / 指纹 {ckpt.get('feat_spec_sha1')} / "
+            f"{ckpt.get('in_dim')} 维\n"
+            f"  当前：特征集 {FEATSET[mode]} / 指纹 {want} / {FEAT_DIM[mode]} 维"
+        )
+    model = FallGRU(ckpt["in_dim"], ckpt.get("hidden", HIDDEN), ckpt.get("layers", LAYERS))
+    model.load_state_dict(ckpt["state_dict"])
+    model.to(DEVICE)
+    return model
 
 
 # ────────────────────────── 3. 评估 ──────────────────────────
@@ -306,7 +400,8 @@ def run_mode(mode: str, data: dict, seed: int = SEED, verbose: bool = True) -> d
 
     model = train_model(train_x, train_y, test_x, test_y, FEAT_DIM[mode], seed, verbose)
     if seed == 0:  # 只保留 seed=0 的模型文件
-        torch.save(model.state_dict(), SAVE_MODEL[mode])
+        save_checkpoint(SAVE_MODEL[mode], model, mode)
+        load_checkpoint(SAVE_MODEL[mode], mode)  # 回读校验：让保存路径也有测试守着
 
     # ── 视频级判定 ──
     labels = np.array([data[v]["label"] for v in test_videos])
