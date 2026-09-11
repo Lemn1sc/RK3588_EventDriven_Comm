@@ -39,6 +39,9 @@ from ultralytics import YOLO  # noqa: E402
 
 import detect_fall_video as dfv  # noqa: E402  复用 process_frame（同特征、同判定）
 from common.event_vector import event_from_result  # noqa: E402
+from common.metrics import (  # noqa: E402
+    agg_scores, format_ties, roc_auc, roc_curve, ties_report, tpr_at_fpr,
+)
 
 DATA_DIR = ROOT / "data" / "datasets" / "URFD"
 CACHE_DIR = ROOT / "data" / "recordings" / "detect_fall"
@@ -208,46 +211,33 @@ def eval_acc(model, x, y):
 
 
 # ────────────────────────── 3. 评估 ──────────────────────────
-def video_scores(model, videos, data):
-    """每段测试视频 → GRU 窗口最大概率（任一窗口疑似跌倒即倾向跌倒）。"""
+
+# 单帧基线在两种模式下用的规则本来就不同，报告里必须写明是哪一条
+# （det 走契约的 severity 阈值，pose 走 judge 的框+姿态融合判定）。
+SF_RULE = {"det": "severity>=0.5", "pose": "judge(框+姿态融合)"}
+
+
+def build_windows(data: dict, videos) -> dict:
+    """视频列表 → {视频名: (窗口张量 X, 窗口标签 y)}。
+
+    短于 WINDOW 帧的视频没有窗口，会被跳过（调用方需处理"该视频无窗口"的情况）。
+    """
+    out = {}
+    for name in videos:
+        win, lab = make_windows(data[name]["feats"], data[name]["label"])
+        if win is not None:
+            out[name] = (win, lab)
+    return out
+
+
+def window_probs(model, windows: dict) -> dict:
+    """{视频名: (X, y)} → {视频名: 每窗口跌倒概率}。每段只前向一次。"""
     model.eval()
-    scores = {}
+    out = {}
     with torch.no_grad():
-        for name in videos:
-            win, _ = make_windows(data[name]["feats"], data[name]["label"])
-            if win is None:
-                scores[name] = 0.0
-                continue
-            p = torch.sigmoid(model(torch.tensor(win, device=DEVICE))).cpu().numpy()
-            scores[name] = float(p.max())
-    return scores
-
-
-def roc(labels, scores):
-    """标准 ROC：返回 (fpr, tpr, AUC)，梯形积分。label 1 = 跌倒。"""
-    order = np.argsort(scores)
-    labs = labels[order]
-    n_pos = float((labs == 1).sum())
-    n_neg = float((labs == 0).sum())
-    fpr, tpr = [0.0], [0.0]
-    tp = fp = 0
-    for lab in labs[::-1]:
-        if lab == 1:
-            tp += 1
-        else:
-            fp += 1
-        tpr.append(tp / n_pos)
-        fpr.append(fp / n_neg)
-    tpr.append(1.0)
-    fpr.append(1.0)
-    fpr, tpr = np.array(fpr), np.array(tpr)
-    return fpr, tpr, float(np.trapz(tpr, fpr))
-
-
-def tpr_at_fpr(fpr, tpr, target):
-    """FPR ≤ target 时的最高跌倒检出率（TPR）。"""
-    ok = fpr <= target + 1e-9
-    return float(tpr[ok].max()) if ok.any() else 0.0
+        for name, (win, _) in windows.items():
+            out[name] = torch.sigmoid(model(torch.tensor(win, device=DEVICE))).cpu().numpy()
+    return out
 
 
 def run_mode(mode: str, data: dict, seed: int = SEED, verbose: bool = True) -> dict:
@@ -255,18 +245,19 @@ def run_mode(mode: str, data: dict, seed: int = SEED, verbose: bool = True) -> d
         print(f"\n########## 特征源 [{mode}]（{FEAT_DIM[mode]} 维/帧）· seed={seed} ##########")
     train_videos, test_videos = split_videos(data, seed)
 
-    all_x, all_y = [], []
-    for name in train_videos:
-        win, lab = make_windows(data[name]["feats"], data[name]["label"])
-        if win is not None:
-            all_x.append(win)
-            all_y.append(lab)
-    train_x = np.concatenate(all_x)
-    train_y = np.concatenate(all_y)
-    test_x = np.concatenate([w for w, _ in (make_windows(data[n]["feats"], data[n]["label"])
-                                            for n in test_videos) if w is not None])
-    test_y = np.concatenate([l for _, l in (make_windows(data[n]["feats"], data[n]["label"])
-                                            for n in test_videos) if l is not None])
+    # 窗口只切一次，训练/测试/评分共用。旧版把测试集切了 3 遍（两个列表推导各一遍
+    # 取 X 和 y，video_scores 内部又一遍），纯浪费且是改造聚合方式时要动的地方。
+    train_win = build_windows(data, train_videos)
+    test_win = build_windows(data, test_videos)
+    if not train_win or not test_win:
+        raise SystemExit(
+            f"[{mode}] 窗口为空：检查 data/datasets/URFD 是否就位、"
+            f"以及视频长度是否都短于 WINDOW={WINDOW} 帧"
+        )
+    train_x = np.concatenate([w for w, _ in train_win.values()])
+    train_y = np.concatenate([l for _, l in train_win.values()])
+    test_x = np.concatenate([w for w, _ in test_win.values()])
+    test_y = np.concatenate([l for _, l in test_win.values()])
     if verbose:
         print(f"设备 {DEVICE} · 训练 {len(train_videos)} 视频 / 测试 {len(test_videos)} 视频 · "
               f"训练窗口 {len(train_x)} 条 / 测试窗口 {len(test_x)} 条")
@@ -275,25 +266,36 @@ def run_mode(mode: str, data: dict, seed: int = SEED, verbose: bool = True) -> d
     if seed == 0:  # 只保留 seed=0 的模型文件
         torch.save(model.state_dict(), SAVE_MODEL[mode])
 
-    # 视频级判定
+    # ── 视频级判定 ──
     labels = np.array([data[v]["label"] for v in test_videos])
-    sf_scores = np.array([float(data[v]["sf"].mean()) for v in test_videos])  # 单帧:跌倒帧占比
-    gs = video_scores(model, test_videos, data)
-    gs_scores = np.array([gs[v] for v in test_videos])
+    # 每段测试视频的窗口数（长度 ∝ 视频时长；这是"取 max 聚合"偏置的来源，必须报出来）
+    n_win = np.array([len(test_win[v][0]) if v in test_win else 0 for v in test_videos])
+    sf_scores = np.array([float(data[v]["sf"].mean()) for v in test_videos])  # 单帧:触发帧占比
+    probs = window_probs(model, test_win)
+    gs_scores = np.array([agg_scores(probs.get(v, []), "max") for v in test_videos])
 
-    fpr_sf, tpr_sf, auc_sf = roc(labels, sf_scores)
-    fpr_gs, tpr_gs, auc_gs = roc(labels, gs_scores)
+    # AUC 走 common.metrics：并列分数按秩公式处理（旧的 np.argsort+trapz 在并列时
+    # 给出的是排序的副产品而非确定值，见 src/common/metrics.py 顶部说明）。
+    auc_sf = roc_auc(labels, sf_scores)
+    auc_gs = roc_auc(labels, gs_scores)
+    fpr_sf, tpr_sf = roc_curve(labels, sf_scores)
+    fpr_gs, tpr_gs = roc_curve(labels, gs_scores)
+    ties = ties_report(labels, sf_scores)
 
     sf_v = dict(zip(test_videos, sf_scores))
     base_tp = sum(1 for n in test_videos if data[n]["label"] == 1 and sf_v[n] >= SF_RATIO_THRES)
     base_fp = sum(1 for n in test_videos if data[n]["label"] == 0 and sf_v[n] >= SF_RATIO_THRES)
-    print(f"\n  [视频级对比] 单帧基线(固定规则): 检出 {base_tp}/{(labels == 1).sum()} · "
-          f"误报 {base_fp}/{(labels == 0).sum()}")
-    print(f"  ROC-AUC（0.5=随机）: 单帧={auc_sf:.3f} → GRU={auc_gs:.3f}")
-    for target in (0.0, 0.1, 0.2):
-        print(f"  FPR≤{target:.1f} 时检出率: 单帧={tpr_at_fpr(fpr_sf, tpr_sf, target) * 100:.0f}%  "
-              f"GRU={tpr_at_fpr(fpr_gs, tpr_gs, target) * 100:.0f}%")
-    print(f"  模型已存: {SAVE_MODEL[mode]}")
+    if verbose:
+        print(f"\n  [视频级对比] 单帧基线(规则 {SF_RULE[mode]}, 阈值 {SF_RATIO_THRES}): "
+              f"检出 {base_tp}/{(labels == 1).sum()} · 误报 {base_fp}/{(labels == 0).sum()}")
+        print(f"  单帧基线分数并列体检: {format_ties(ties)}")
+        print(f"  ROC-AUC（0.5=随机）: 单帧={auc_sf:.3f} → GRU(max)={auc_gs:.3f}")
+        for target in (0.0, 0.1, 0.2):
+            print(f"  FPR≤{target:.1f} 时检出率: 单帧={tpr_at_fpr(fpr_sf, tpr_sf, target) * 100:.0f}%  "
+                  f"GRU={tpr_at_fpr(fpr_gs, tpr_gs, target) * 100:.0f}%")
+        print(f"  测试视频窗口数: {n_win.min()}~{n_win.max()}（相差 "
+              f"{n_win.max() / max(n_win.min(), 1):.0f} 倍，max 聚合下长视频机会更多）")
+        print(f"  模型已存: {SAVE_MODEL[mode]}")
 
     # 对齐基线误报率的工作点（GRU 单点），供最终汇总
     base_fpr = float((sf_scores[labels == 0] >= SF_RATIO_THRES).mean()) if (labels == 0).sum() else 0.0
@@ -301,11 +303,27 @@ def run_mode(mode: str, data: dict, seed: int = SEED, verbose: bool = True) -> d
     gv = dict(zip(test_videos, gs_scores >= thr))
     g_tp = sum(1 for n in test_videos if data[n]["label"] == 1 and gv[n])
     g_fp = sum(1 for n in test_videos if data[n]["label"] == 0 and gv[n])
-    print(f"  GRU(对齐基线误报,阈值={thr:.2f}): 检出 {g_tp}/{(labels == 1).sum()} · 误报 {g_fp}/{(labels == 0).sum()}")
+    if verbose:
+        print(f"  GRU(对齐基线误报,阈值={thr:.2f}): 检出 {g_tp}/{(labels == 1).sum()} · "
+              f"误报 {g_fp}/{(labels == 0).sum()}")
 
-    return {"auc_sf": auc_sf, "auc_gs": auc_gs, "tpr0_sf": tpr_at_fpr(fpr_sf, tpr_sf, 0.0),
-            "tpr0_gs": tpr_at_fpr(fpr_gs, tpr_gs, 0.0), "tpr1_gs": tpr_at_fpr(fpr_gs, tpr_gs, 0.1),
-            "tpr1_sf": tpr_at_fpr(fpr_sf, tpr_sf, 0.1)}
+    return {"auc_sf": auc_sf, "auc_gs": auc_gs,
+            "tpr0_sf": tpr_at_fpr(fpr_sf, tpr_sf, 0.0),
+            "tpr0_gs": tpr_at_fpr(fpr_gs, tpr_gs, 0.0),
+            "tpr1_gs": tpr_at_fpr(fpr_gs, tpr_gs, 0.1),
+            "tpr1_sf": tpr_at_fpr(fpr_sf, tpr_sf, 0.1),
+            "ties_max_group": ties["max_group"],
+            "n_win_min": int(n_win.min()), "n_win_max": int(n_win.max())}
+
+
+def mstd(mlist, key, scale=100.0, fmt="{:.0f}±{:.0f}"):
+    """mean±std。显式接收列表（旧版用闭包读循环变量 mode，多特征集扩展必踩坑）。"""
+    a = np.array([r[key] for r in mlist], dtype=np.float64) * scale
+    return fmt.format(a.mean(), a.std())
+
+
+def mean_of(mlist, key):
+    return float(np.array([r[key] for r in mlist], dtype=np.float64).mean())
 
 
 def main():
@@ -324,23 +342,23 @@ def main():
             r = run_mode(mode, data, seed=s, verbose=(seeds == 1))
             mlist.append(r)
             print(f"  seed{s}: 单帧@FPR0={r['tpr0_sf'] * 100:.0f}%  GRU@FPR0={r['tpr0_gs'] * 100:.0f}%  "
-                  f"GRU@FPR≤0.1={r['tpr1_gs'] * 100:.0f}%  AUC 单帧→GRU={r['auc_sf']:.3f}→{r['auc_gs']:.3f}")
+                  f"GRU@FPR≤0.1={r['tpr1_gs'] * 100:.0f}%  "
+                  f"AUC 单帧→GRU={r['auc_sf']:.3f}→{r['auc_gs']:.3f}  "
+                  f"(基线并列组最大 {r['ties_max_group']})")
         metrics[mode] = mlist
 
-    def mstd(key):
-        a = np.array([r[key] for r in metrics[mode]])
-        return f"{a.mean() * 100:.0f}±{a.std() * 100:.0f}"
-
-    def mean(key):
-        return float(np.array([r[key] for r in metrics[mode]]).mean())
-
     print(f"\n\n========== 稳健性汇总（mean±std over {seeds} seeds） ==========")
-    print(f"{'特征源':6s} {'单帧检出@FPR0':>16s} {'GRU@FPR0':>12s} {'GRU@FPR≤0.1':>12s} {'AUC单帧':>9s} {'AUC-GRU':>9s}")
+    print(f"{'特征源':6s} {'单帧检出@FPR0':>16s} {'GRU@FPR0':>12s} {'GRU@FPR≤0.1':>12s} "
+          f"{'AUC单帧':>9s} {'AUC-GRU':>9s}")
     for mode in ("det", "pose"):
-        print(f"{mode:6s} {mstd('tpr0_sf'):>16s} {mstd('tpr0_gs'):>12s} {mstd('tpr1_gs'):>12s} "
-              f"{mean('auc_sf'):8.3f} {mean('auc_gs'):8.3f}")
-    print("\n注：det=仅检测(边缘端可用，4维)，pose=检测+姿态(对照组，6维)。")
+        mlist = metrics[mode]
+        print(f"{mode:6s} {mstd(mlist, 'tpr0_sf'):>16s} {mstd(mlist, 'tpr0_gs'):>12s} "
+              f"{mstd(mlist, 'tpr1_gs'):>12s} {mean_of(mlist, 'auc_sf'):8.3f} "
+              f"{mean_of(mlist, 'auc_gs'):8.3f}")
+    print(f"\n注：det=仅检测(边缘端可用，{FEAT_DIM['det']}维)，pose=检测+姿态(对照组，{FEAT_DIM['pose']}维)。")
     print("若 det 的 GRU 稳定接近/超过 pose，说明边缘端只靠检测特征+时序就够，可省去姿态卸载。")
+    print("AUC 按并列取平均秩计算（common.metrics），单帧基线分数存在大量并列，"
+          "旧的不稳定排序实现会给出偏高的任意值。")
 
 
 if __name__ == "__main__":
