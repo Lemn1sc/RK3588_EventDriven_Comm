@@ -27,7 +27,7 @@ __all__ = [
     "EVENT_DIM", "EventType", "EventVector", "NONE_EVENT",
     "IDX_EVENT_TYPE", "IDX_CONFIDENCE", "IDX_BBOX", "IDX_HAS_EVENT", "IDX_SEVERITY",
     "COCO_PERSON", "aspect_abnormality", "build_event",
-    "event_from_detections", "event_from_result",
+    "event_from_detections", "event_from_result", "to_numpy",
 ]
 
 EVENT_DIM = 8
@@ -57,9 +57,14 @@ ASPECT_LYING = 0.7     # ≤ 该值视为完全躺卧，异常度 1
 SEVERITY_SUSPECT = 0.5  # severity ≥ 该值升级为 SUSPECTED
 
 
-@dataclass
+@dataclass(frozen=True)
 class EventVector:
-    """8 维事件向量的结构化视图。to_array() 得定长 np.float32 用于传输/入网。"""
+    """8 维事件向量的结构化视图。to_array() 得定长 np.float32 用于传输/入网。
+
+    frozen：`NONE_EVENT` 是模块级共享单例，且被多处用 `is NONE_EVENT` 判定。
+    若可变，任何一处 `ev.severity = x` 都会污染全进程的「无人帧」语义，
+    而且这种 bug 极难定位。冻结后这类赋值会当场抛 FrozenInstanceError。
+    """
     event_type: EventType = EventType.NONE
     confidence: float = 0.0
     bbox: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)  # 归一化 x1y1x2y2
@@ -151,6 +156,25 @@ def event_from_detections(boxes_xyxyn, confs, classes, conf_thres: float = 0.25)
     return best if best is not None else NONE_EVENT
 
 
+def to_numpy(x) -> np.ndarray:
+    """把「可能是 torch 张量 / 可能是 numpy」的量统一成 numpy。
+
+    这里刻意用鸭子类型而不是 isinstance(torch.Tensor) —— 本模块**不依赖 torch**，
+    否则 `scripts/check_event_vector.py` 就不能在任意环境裸跑（那是它的设计前提）。
+
+    必要性不只是去重：RK3588 板端用 RKNNLite 推理，输出是 numpy 而非张量，
+    手工构造的 Results 也可能是 numpy。硬写 `.cpu()` 会在板端直接 AttributeError ——
+    这是朝向板端移植的一处真实修复。
+    """
+    if hasattr(x, "detach"):  # torch 张量（可能在 GPU 上）
+        x = x.detach()
+    if hasattr(x, "cpu"):
+        x = x.cpu()
+    if hasattr(x, "numpy"):
+        x = x.numpy()
+    return np.asarray(x)
+
+
 def event_from_result(result, conf_thres: float = 0.25) -> EventVector:
     """从 ultralytics Results 对象直接构造（供 edge_node 便捷调用）。
 
@@ -159,7 +183,7 @@ def event_from_result(result, conf_thres: float = 0.25) -> EventVector:
     boxes = getattr(result, "boxes", None)
     if boxes is None or len(boxes) == 0:
         return NONE_EVENT
-    xyxyn = boxes.xyxyn.cpu().numpy()
-    confs = boxes.conf.cpu().numpy()
-    classes = boxes.cls.cpu().numpy()
+    xyxyn = to_numpy(boxes.xyxyn)
+    confs = to_numpy(boxes.conf)
+    classes = to_numpy(boxes.cls)
     return event_from_detections(xyxyn, confs, classes, conf_thres)

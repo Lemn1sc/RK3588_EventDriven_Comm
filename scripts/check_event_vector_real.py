@@ -12,7 +12,6 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import torch
 
 # Windows 控制台默认 GBK，打不出 ✓。用 isinstance 而非 hasattr：
 # typeshed 把 sys.stdout 标注为 TextIO（无 reconfigure），isinstance 能让类型检查器收窄。
@@ -27,7 +26,7 @@ from ultralytics.engine.results import Boxes, Results  # noqa: E402
 
 from common.event_vector import (  # noqa: E402
     EVENT_DIM, EventType, EventVector,
-    event_from_detections, event_from_result,
+    event_from_detections, event_from_result, to_numpy,
 )
 
 MODEL = YOLO(str(ROOT / "models" / "pt" / "yolov8n.pt"))
@@ -36,17 +35,6 @@ MODEL = YOLO(str(ROOT / "models" / "pt" / "yolov8n.pt"))
 def predict(source) -> Results:
     return MODEL.predict(source, verbose=False)[0]
 
-
-def to_numpy(x) -> np.ndarray:
-    """统一转 numpy。
-
-    ultralytics 把 Boxes.xyxyn 等属性标注为 NDArray，但运行时按来源可能是
-    torch 张量（本项目实测 torch.float32，可能在 GPU 上）。两种都吃，
-    顺带把 GPU 张量搬回 CPU —— 这也是 event_from_result() 内部做的事。
-    """
-    if isinstance(x, torch.Tensor):
-        return x.detach().cpu().numpy()
-    return np.asarray(x)
 
 
 def boxes_of(r: Results) -> Boxes:
@@ -135,10 +123,39 @@ def check_empty() -> None:
     print("  [4] 空帧 → NONE_EVENT 全零向量 ✓")
 
 
+def check_numpy_boxes() -> None:
+    """纯 numpy 的 boxes（板端 RKNNLite / 手工构造 Results 的形态）。
+
+    这里不是重复 check_consistency —— 那条走的是"真实模型输出的 torch 张量"，
+    而板端 RKNNLite 给的是 numpy。旧实现硬写 `.cpu().numpy()`，遇到 numpy 会直接
+    AttributeError，所以这个场景以前根本跑不到，也没有测试守着。
+    """
+    class _Boxes:
+        xyxyn = np.array([[0.1, 0.5, 0.7, 0.7]], dtype=np.float32)   # 扁框 → 疑似跌倒
+        conf = np.array([0.9], dtype=np.float32)
+        cls = np.array([0.0], dtype=np.float32)
+
+        def __len__(self):
+            return 1
+
+    class _Results:
+        boxes = _Boxes()
+
+    ev = event_from_result(_Results())
+    assert ev.event_type == EventType.SUSPECTED, ev.event_type
+    assert abs(ev.severity - 0.9) < 1e-5, ev.severity
+
+    # to_numpy 本身：numpy 进 numpy 出、不因缺 .cpu() 而炸
+    arr = np.zeros(4, dtype=np.float32)
+    assert to_numpy(arr) is arr or np.array_equal(to_numpy(arr), arr)
+    print("  [5] 纯 numpy boxes（板端 RKNNLite 形态）不依赖 .cpu() ✓")
+
+
 if __name__ == "__main__":
     print("模型: models/pt/yolov8n.pt  数据源: ultralytics 自带 bus.jpg / zidane.jpg\n")
     bus = check_upright()
     check_consistency(bus)
     check_suspected()
     check_empty()
+    check_numpy_boxes()
     print("\n真实输出验证 OK ✓")

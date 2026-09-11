@@ -58,8 +58,31 @@ def check_detections():
     print("  [3] 多人挑主目标 + 类别/阈值过滤 ✓")
 
 
+def check_immutable():
+    """契约对象不可变。
+
+    NONE_EVENT 是模块级共享单例，且被多处用 `is NONE_EVENT` 判定。若可变，
+    任何一处 `NONE_EVENT.severity = x` 都会污染全进程的「无人帧」语义 —— 这类
+    bug 极难定位。冻结后当场抛错。
+    """
+    from dataclasses import FrozenInstanceError
+
+    # 语义等价按值判断（不依赖"它就是那个单例"这个实现细节）
+    assert EventVector() == NONE_EVENT
+    for field in ("severity", "has_event", "event_type", "confidence", "bbox"):
+        try:
+            setattr(NONE_EVENT, field, 0.9)
+        except FrozenInstanceError:
+            continue
+        raise AssertionError(f"EventVector.{field} 可被原地修改，契约失守")
+    # 上面尝试赋值后，单例本身必须还是全零
+    assert np.allclose(NONE_EVENT.to_array(), np.zeros(EVENT_DIM, dtype=np.float32))
+    print("  [4] 契约对象不可变（共享的 NONE_EVENT 不会被改脏）✓")
+
+
 if __name__ == "__main__":
     check_roundtrip()
     check_severity()
     check_detections()
+    check_immutable()
     print("事件向量契约 OK ✓")
