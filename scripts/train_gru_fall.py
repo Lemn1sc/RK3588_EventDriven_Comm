@@ -40,7 +40,7 @@ from ultralytics import YOLO  # noqa: E402
 import detect_fall_video as dfv  # noqa: E402  复用 process_frame（同特征、同判定）
 from common.event_vector import event_from_result  # noqa: E402
 from common.metrics import (  # noqa: E402
-    agg_scores, format_ties, roc_auc, roc_curve, ties_report, tpr_at_fpr,
+    DEFAULT_AGGS, agg_scores, format_ties, roc_auc, roc_curve, ties_report, tpr_at_fpr,
 )
 
 DATA_DIR = ROOT / "data" / "datasets" / "URFD"
@@ -272,14 +272,19 @@ def run_mode(mode: str, data: dict, seed: int = SEED, verbose: bool = True) -> d
     n_win = np.array([len(test_win[v][0]) if v in test_win else 0 for v in test_videos])
     sf_scores = np.array([float(data[v]["sf"].mean()) for v in test_videos])  # 单帧:触发帧占比
     probs = window_probs(model, test_win)
-    gs_scores = np.array([agg_scores(probs.get(v, []), "max") for v in test_videos])
+    # 三种聚合同时算：max 会把"整段视频是否跌倒"交给最像跌倒的那个窗口，是口径最松、
+    # 也最容易受视频长度影响的选法（窗口数 3~38，长视频机会多）；mean 会被大量正常帧
+    # 稀释；top3mean 居中。结论对聚合方式的敏感性本身就是一条要报告的结果。
+    gs_scores = {how: np.array([agg_scores(probs.get(v, []), how) for v in test_videos])
+                 for how in DEFAULT_AGGS}
 
     # AUC 走 common.metrics：并列分数按秩公式处理（旧的 np.argsort+trapz 在并列时
     # 给出的是排序的副产品而非确定值，见 src/common/metrics.py 顶部说明）。
     auc_sf = roc_auc(labels, sf_scores)
-    auc_gs = roc_auc(labels, gs_scores)
+    auc_gs = {how: roc_auc(labels, s) for how, s in gs_scores.items()}
     fpr_sf, tpr_sf = roc_curve(labels, sf_scores)
-    fpr_gs, tpr_gs = roc_curve(labels, gs_scores)
+    gs_curves = {how: roc_curve(labels, s) for how, s in gs_scores.items()}
+    fpr_gs, tpr_gs = gs_curves["max"]
     ties = ties_report(labels, sf_scores)
 
     sf_v = dict(zip(test_videos, sf_scores))
@@ -289,31 +294,42 @@ def run_mode(mode: str, data: dict, seed: int = SEED, verbose: bool = True) -> d
         print(f"\n  [视频级对比] 单帧基线(规则 {SF_RULE[mode]}, 阈值 {SF_RATIO_THRES}): "
               f"检出 {base_tp}/{(labels == 1).sum()} · 误报 {base_fp}/{(labels == 0).sum()}")
         print(f"  单帧基线分数并列体检: {format_ties(ties)}")
-        print(f"  ROC-AUC（0.5=随机）: 单帧={auc_sf:.3f} → GRU(max)={auc_gs:.3f}")
+        print(f"  ROC-AUC（0.5=随机）: 单帧={auc_sf:.3f} → GRU(max)={auc_gs['max']:.3f}")
+        for how in DEFAULT_AGGS:
+            f, t = gs_curves[how]
+            print(f"    聚合 [{how:8s}] AUC={auc_gs[how]:.3f}  "
+                  f"@FPR0={tpr_at_fpr(f, t, 0.0) * 100:.0f}%  "
+                  f"@FPR≤0.1={tpr_at_fpr(f, t, 0.1) * 100:.0f}%")
         for target in (0.0, 0.1, 0.2):
             print(f"  FPR≤{target:.1f} 时检出率: 单帧={tpr_at_fpr(fpr_sf, tpr_sf, target) * 100:.0f}%  "
-                  f"GRU={tpr_at_fpr(fpr_gs, tpr_gs, target) * 100:.0f}%")
+                  f"GRU(max)={tpr_at_fpr(fpr_gs, tpr_gs, target) * 100:.0f}%")
         print(f"  测试视频窗口数: {n_win.min()}~{n_win.max()}（相差 "
               f"{n_win.max() / max(n_win.min(), 1):.0f} 倍，max 聚合下长视频机会更多）")
         print(f"  模型已存: {SAVE_MODEL[mode]}")
 
-    # 对齐基线误报率的工作点（GRU 单点），供最终汇总
+    # 对齐基线误报率的工作点（GRU 单点，取 max 聚合），供最终汇总
+    gs_max = gs_scores["max"]
     base_fpr = float((sf_scores[labels == 0] >= SF_RATIO_THRES).mean()) if (labels == 0).sum() else 0.0
-    thr = min(sorted(set(gs_scores)), key=lambda t: abs(float((gs_scores[labels == 0] >= t).mean()) - base_fpr))
-    gv = dict(zip(test_videos, gs_scores >= thr))
+    thr = min(sorted(set(gs_max)), key=lambda t: abs(float((gs_max[labels == 0] >= t).mean()) - base_fpr))
+    gv = dict(zip(test_videos, gs_max >= thr))
     g_tp = sum(1 for n in test_videos if data[n]["label"] == 1 and gv[n])
     g_fp = sum(1 for n in test_videos if data[n]["label"] == 0 and gv[n])
     if verbose:
         print(f"  GRU(对齐基线误报,阈值={thr:.2f}): 检出 {g_tp}/{(labels == 1).sum()} · "
               f"误报 {g_fp}/{(labels == 0).sum()}")
 
-    return {"auc_sf": auc_sf, "auc_gs": auc_gs,
-            "tpr0_sf": tpr_at_fpr(fpr_sf, tpr_sf, 0.0),
-            "tpr0_gs": tpr_at_fpr(fpr_gs, tpr_gs, 0.0),
-            "tpr1_gs": tpr_at_fpr(fpr_gs, tpr_gs, 0.1),
-            "tpr1_sf": tpr_at_fpr(fpr_sf, tpr_sf, 0.1),
-            "ties_max_group": ties["max_group"],
-            "n_win_min": int(n_win.min()), "n_win_max": int(n_win.max())}
+    out = {"auc_sf": auc_sf, "auc_gs": auc_gs["max"],
+           "tpr0_sf": tpr_at_fpr(fpr_sf, tpr_sf, 0.0),
+           "tpr0_gs": tpr_at_fpr(fpr_gs, tpr_gs, 0.0),
+           "tpr1_gs": tpr_at_fpr(fpr_gs, tpr_gs, 0.1),
+           "tpr1_sf": tpr_at_fpr(fpr_sf, tpr_sf, 0.1),
+           "ties_max_group": ties["max_group"],
+           "n_win_min": int(n_win.min()), "n_win_max": int(n_win.max())}
+    for how in DEFAULT_AGGS:  # 聚合敏感性：每个聚合各一套指标
+        f, t = gs_curves[how]
+        out[f"auc_gs_{how}"] = auc_gs[how]
+        out[f"tpr0_gs_{how}"] = tpr_at_fpr(f, t, 0.0)
+    return out
 
 
 def mstd(mlist, key, scale=100.0, fmt="{:.0f}±{:.0f}"):
@@ -355,6 +371,18 @@ def main():
         print(f"{mode:6s} {mstd(mlist, 'tpr0_sf'):>16s} {mstd(mlist, 'tpr0_gs'):>12s} "
               f"{mstd(mlist, 'tpr1_gs'):>12s} {mean_of(mlist, 'auc_sf'):8.3f} "
               f"{mean_of(mlist, 'auc_gs'):8.3f}")
+    print(f"\n\n========== 聚合方式敏感性（同一批 GRU 窗口分数，只换汇总方式） ==========")
+    print("窗口 → 视频级分数的汇总方式不同，结论会不同；单帧基线未参与，纯 GRU 侧对照。")
+    print(f"{'特征源':6s} {'聚合':<10s} {'AUC':>16s} {'检出@FPR0':>16s}")
+    for mode in ("det", "pose"):
+        mlist = metrics[mode]
+        for how in DEFAULT_AGGS:
+            print(f"{mode:6s} {how:<10s} {mstd(mlist, f'auc_gs_{how}', scale=1.0, fmt='{:.3f}±{:.3f}'):>16s} "
+                  f"{mstd(mlist, f'tpr0_gs_{how}'):>16s}")
+    nw = [(r["n_win_min"], r["n_win_max"]) for r in metrics["det"]]
+    print(f"\n每段测试视频的窗口数范围: {min(a for a, _ in nw)}~{max(b for _, b in nw)}"
+          f"（max 聚合下窗口多的视频天然机会更多，这是与标签无关的长度偏置）")
+
     print(f"\n注：det=仅检测(边缘端可用，{FEAT_DIM['det']}维)，pose=检测+姿态(对照组，{FEAT_DIM['pose']}维)。")
     print("若 det 的 GRU 稳定接近/超过 pose，说明边缘端只靠检测特征+时序就够，可省去姿态卸载。")
     print("AUC 按并列取平均秩计算（common.metrics），单帧基线分数存在大量并列，"
