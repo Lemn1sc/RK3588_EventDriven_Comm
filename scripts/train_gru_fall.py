@@ -1,21 +1,32 @@
 """T0.6 前奏 · 简单 GRU 跌倒检测（时序 vs 单帧，看提升效果）。
 
-支持两种特征来源，一次跑完对比：
-  - det  ：**仅 yolov8n 检测**（边缘端真实可用，RK3588 NPU 上便宜）
-           4 维 = [has_event, confidence, severity, 框高宽比h/w]（即事件向量的降维）
-  - pose ：检测 + yolov8n-pose 姿态（6 维，多 躯干倾角/髋踝高差，需远端/较高算力）
+本脚本只**消费**特征，不再自己跑模型。特征是 `scripts/gru_features.py` 从原始帧表
+算出来的，所以「换一组特征看看」是秒级操作 —— 不需要重新推理、更不需要重训模型。
+
+特征集（详见 scripts/gru_features.py 的注册表）：
+  det.v1   4 维 = [has_event, confidence, severity, 框高宽比]   旧版基线，供对照
+  det.v2a  6 维 = det.v1 + [框中心 y, 尺度 sqrt(面积)]
+  det.v2   8 维 = det.v2a + [相对近 30 帧基线的中心下沉比, 尺度突变比 log2]
+  pose.v1  6 维 = 旧版姿态基线（det.v1 的 4 维 + 躯干倾角 + 髋踝高差）
+  pose.v2 10 维 = det.v2 的 8 维 + 同样的 2 维姿态量
+
+det.v2 与 pose.v2 的前 8 维完全相同、只差 2 个姿态量，所以「姿态值不值得卸载」
+这个对比是公平的消融。
 
 对比逻辑（同一批测试视频）：
-  单帧基线（det: severity≥0.5 触发；pose: 几何判定跌倒帧占比≥0.2）
-  vs 简单 GRU（30 帧滑窗 → GRU → 视频级 max 概率，ROC 对齐误报率比较）。
+  单帧基线（severity≥0.5 或 judge 融合判定，两条都报）vs 简单 GRU
+  （30 帧滑窗 → GRU → 视频级分数，ROC 对齐误报率比较）。
 
-动机（docs/08 实测）：单帧几何——无论纯框还是姿态——都分不开"跌倒 vs 日常躺卧"，
+动机（docs/08 实测）：单帧几何——无论纯框还是姿态——都分不开「跌倒 vs 日常躺卧」，
 且低位视角下纯高宽比漏检 ~90%。这里看加一个 GRU 吃时序能提升多少，
-以及"只靠检测特征"够不够。
+以及「只靠检测特征」够不够。
 
 用法：
-    python scripts/train_gru_fall.py             # 两种特征源都跑（pose 特征已缓存则秒出）
-    python scripts/train_gru_fall.py --recompute # 强制重新提取特征
+    python scripts/gru_features.py list                                   # 看有哪些特征集
+    python scripts/gru_features.py frames --mode det                      # 产原始帧表（跑模型）
+    python scripts/gru_features.py feats --featsets det.v1 det.v2         # 帧表 → 特征（秒级）
+    python scripts/train_gru_fall.py                                      # 全部特征集，5 seed
+    python scripts/train_gru_fall.py --featsets det.v1 det.v2 --seeds 5   # 消融对照
 """
 import argparse
 import json
@@ -34,49 +45,21 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-import cv2  # noqa: E402
 import torch  # noqa: E402
 import torch.nn as nn  # noqa: E402
-from ultralytics import YOLO  # noqa: E402
 
-import detect_fall_video as dfv  # noqa: E402  复用 process_frame（同特征、同判定）
-from common.event_vector import event_from_result  # noqa: E402
 from common.metrics import (  # noqa: E402
     DEFAULT_AGGS, agg_scores, format_ties, roc_auc, roc_curve, ties_report, tpr_at_fpr,
 )
-from common.cache import (  # noqa: E402
-    META_KEY, SPEC_KEY, check_dims, load_npz, save_npz, spec_sha1,
-)
+from common.cache import check_dims, load_npz, spec_sha1  # noqa: E402
+import gru_features as gf  # noqa: E402  特征集注册表 / 原始帧表 / 单帧基线
 
-DATA_DIR = ROOT / "data" / "datasets" / "URFD"
-CACHE_DIR = ROOT / "data" / "recordings" / "detect_fall"
+rel = gf.rel  # 显示路径用，报错信息里不因为路径转换再抛异常
 
-# 特征集名带版本，缓存与权重都用它命名 —— 新旧版本并存、互不覆盖，
-# 所以切回旧特征集不需要改代码，也不会把旧产物冲掉。
-FEATSET = {"det": "det.v1", "pose": "pose.v1"}
-CACHE = {m: CACHE_DIR / f"feats_{v}.npz" for m, v in FEATSET.items()}
-SAVE_MODEL = {m: ROOT / "models" / "pt" / f"gru_fall_{m}.{FEATSET[m].split('.')[-1]}.pt"
-              for m in FEATSET}
-FEAT_DIM = {"det": 4, "pose": 6}
 
-# 特征规格：指纹的输入。凡是会影响数值的常数都必须写进来 —— 否则把它们改掉
-# 不会触发缓存失效，而"改常数"恰恰是最容易被悄悄改坏的一类改动。
-FEAT_SPEC = {
-    "det": {
-        "featset": "det.v1", "dim": 4, "source": "yolov8n 检测 → event_vector",
-        "names": ["has_event", "confidence", "severity", "aspect_norm"],
-        "conf_clip": [0.0, 1.0], "sev_clip": [0.0, 1.0],
-        "aspect_clip": [0.3, 4.0], "aspect_div": 4.0, "no_event_value": 0.0,
-    },
-    "pose": {
-        "featset": "pose.v1", "dim": 6, "source": "yolov8n-pose 全帧 → judge 行",
-        "names": ["has_event", "confidence", "severity", "aspect_norm",
-                  "torso_tilt_norm", "hip_ankle_ratio"],
-        "conf_clip": [0.0, 1.0], "sev_clip": [0.0, 1.0],
-        "aspect_clip": [0.3, 4.0], "aspect_div": 4.0, "no_event_value": 0.0,
-        "torso_div": 90.0, "hip_ankle_clip": [0.0, 1.0], "hip_ankle_missing": 1.0,
-    },
-}
+def model_path(featset: str) -> Path:
+    """权重路径带特征集身份：换特征集就换文件，不会把旧权重冲掉。"""
+    return ROOT / "models" / "pt" / f"gru_fall_{featset}.pt"
 
 # ── GRU 超参（简单，够演示）──
 WINDOW = 30          # 每窗口帧数（≈1s）
@@ -88,8 +71,7 @@ BATCH = 64
 LR = 1e-3
 SEED = 0
 
-SEVERITY_SUSPECT = 0.5  # det 单帧基线的触发阈值（与 event_vector 契约一致）
-SF_RATIO_THRES = 0.2    # 单帧基线：跌倒帧占比 ≥ 该值判该视频跌倒（与 bench_pose_fall 一致）
+SF_RATIO_THRES = 0.2    # 单帧基线：触发帧占比 ≥ 该值判该视频跌倒（与 bench_pose_fall 一致）
 TEST_FRAC = 0.25        # 测试视频占比（按视频划分，防同视频窗口泄漏）
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -99,142 +81,50 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 RESULTS_DIR = ROOT / "experiments" / "results"
 
 
-# ────────────────────────── 1. 特征提取（两种模式）──────────────────────────
-def feats_from_event(ev, has_event) -> np.ndarray:
-    """det 模式：一帧事件向量 → 4 维特征。"""
-    f = np.zeros(4, dtype=np.float32)
-    if has_event:
-        x1, y1, x2, y2 = ev.bbox
-        aspect = (y2 - y1) / max(x2 - x1, 1e-6)
-        f[0] = 1.0
-        f[1] = min(max(float(ev.confidence), 0.0), 1.0)
-        f[2] = min(max(float(ev.severity), 0.0), 1.0)
-        f[3] = min(max(aspect, 0.3), 4.0) / 4.0
-    return np.nan_to_num(f, nan=0.0)
+# ──────────────── 1. 取特征与单帧基线（只读缓存，不再自己跑模型）────────────────
 
+def load_feats(featset: str) -> dict:
+    """严格加载特征缓存（文件名/指纹/形状三重校验，见 common.cache）。
 
-def feats_from_pose(row) -> np.ndarray:
-    """pose 模式：process_frame 的一行日志 → 6 维特征（含姿态几何量）。"""
-    f = np.zeros(6, dtype=np.float32)
-    if row["has_event"]:
-        f[0] = 1.0
-        f[1] = min(max(float(row["confidence"]), 0.0), 1.0)
-        f[2] = min(max(float(row["severity"]), 0.0), 1.0)
-        f[3] = min(max(float(row["aspect_ratio"]), 0.3), 4.0) / 4.0
-    if row["torso_angle"]:
-        f[4] = min(max(float(row["torso_angle"]) / 90.0, 0.0), 1.0)
-    if row["hip_ankle_ratio"]:
-        f[5] = min(max(float(row["hip_ankle_ratio"]), 0.0), 1.0)
-    else:
-        f[5] = 1.0  # 关键点缺失→按直立处理
-    return np.nan_to_num(f, nan=0.0)
-
-
-def rel(p: Path) -> Path | str:
-    """尽量显示成仓库相对路径；不在仓库内（或本来就缺失）时原样返回。
-
-    报错信息本身绝不能因为路径转换再抛一次异常 —— 那样真正的病因就被埋了。
+    特征由 `scripts/gru_features.py` 从原始帧表产出，本脚本不再自己跑模型 ——
+    所以「换个特征看看」是秒级操作，不需要重训也不需要重新推理。
     """
-    try:
-        return Path(p).resolve().relative_to(ROOT)
-    except (ValueError, OSError):
-        return p
-
-
-def require_inputs() -> None:
-    """提取特征前的输入检查。
-
-    没有这一步时，数据缺失会在后面 `np.concatenate([])` 处抛一个与病因无关的
-    ValueError，新协作者（clone 之后必然没有那 100MB 数据集）会一脸茫然。
-    """
-    problems = []
-    if not DATA_DIR.is_dir() or not any(DATA_DIR.glob("*/*.mp4")):
-        problems.append(
-            f"数据集缺失或为空：{rel(DATA_DIR)}\n"
-            "      下载：https://gitcode.com/Universal-Tool/fa314 （URFD_video.zip，国内可直连）\n"
-            "      解压出 URFD/{fall,adl}/*.mp4（30 段跌倒 + 40 段日常）放到该目录，详见 docs/08 §1"
+    fs = gf.FEATSETS[featset]
+    cache = gf.FEAT_CACHE[featset]
+    if not cache.exists():
+        raise SystemExit(
+            f"特征缓存不存在：{gf.rel(cache)}\n"
+            f"  → 1) 先产原始帧表（跑模型，较慢；断点可续）：\n"
+            f"        python scripts/gru_features.py frames --mode {fs.frames}"
+            f"{' --resume' if fs.frames == 'pose' else ''}\n"
+            f"  → 2) 再从帧表生成特征（秒级，可反复跑）：\n"
+            f"        python scripts/gru_features.py feats --featsets {featset}"
         )
-    for name in ("yolov8n.pt", "yolov8n-pose.pt"):
-        if not (dfv.PT_DIR / name).exists():
-            problems.append(
-                f"模型缺失：{rel(dfv.PT_DIR / name)}"
-                "（ultralytics 首次加载时会自动下载到该目录）"
-            )
-    if problems:
-        raise SystemExit("输入检查未通过：\n  - " + "\n  - ".join(problems)
-                         + "\n\n（若只是想用已有缓存复现旧结果，请勿加 --recompute。）")
+    what = f"[{featset}] 特征缓存"
+    npz, _meta = load_npz(cache, fs.spec, what=what)
+    names = sorted(k for k in npz.files
+                   if k not in ("__meta__", "__spec_sha1__") and not k.endswith("_label"))
+    if not names:
+        raise SystemExit(f"{what}里没有任何视频条目：{gf.rel(cache)}")
+    check_dims(npz, names, fs.dim, what=what, path=cache)
+    return {k: {"feats": npz[k], "label": float(npz[f"{k}_label"][0])} for k in names}
 
 
-def extract_features(mode: str) -> dict:
-    """遍历 70 段视频，每段返回 (feats(T,F), sf(T,)单帧判定, label)。"""
-    require_inputs()
-    det = YOLO(str(dfv.PT_DIR / "yolov8n.pt"))
-    pose = YOLO(str(dfv.PT_DIR / "yolov8n-pose.pt")) if mode == "pose" else None
-    out = {}
-    for split in ("fall", "adl"):
-        for video in sorted((DATA_DIR / split).glob("*.mp4")):
-            cap = cv2.VideoCapture(str(video))
-            feats, sf = [], []
-            while True:
-                ok, frame = cap.read()
-                if not ok:
-                    break
-                if mode == "pose":
-                    _, row = dfv.process_frame(frame, det, pose, always_pose=True)
-                    feats.append(feats_from_pose(row))
-                    sf.append(float(row["fall"]))
-                else:
-                    ev = event_from_result(det(frame, verbose=False)[0])
-                    feats.append(feats_from_event(ev, ev.has_event))
-                    sf.append(float(ev.severity >= SEVERITY_SUSPECT))
-            cap.release()
-            out[f"{split}/{video.name}"] = {
-                "feats": np.asarray(feats, dtype=np.float32),
-                "sf": np.asarray(sf, dtype=np.float32),
-                "label": 1.0 if split == "fall" else 0.0,
-            }
-    return out
+def load_baselines(frameset: str, keys) -> dict:
+    """从原始帧表重算单帧基线：{规则名: {视频名: 触发帧占比}}。
 
-
-def item_names(npz) -> list[str]:
-    """缓存里的条目名（排除元数据键与 _sf / _label 后缀键）。"""
-    return sorted(k for k in npz.files
-                  if k not in (SPEC_KEY, META_KEY)
-                  and not k.endswith("_sf") and not k.endswith("_label"))
-
-
-def load_or_extract(mode: str, recompute: bool) -> dict:
-    """取特征：优先读缓存（严格校验版本），否则重新提取。
-
-    读缓存走 common.cache 的三层校验：文件名带特征集身份、内容指纹必须与当前
-    代码一致、形状再兜一道。任何一条不符都报错停下，绝不"兼容读取"。
+    为什么要回帧表取：单帧基线是"不接时序"的对照方法，它的判定规则（severity 阈值
+    或 judge 融合判定）不属于任何特征集，而是帧级事实。两条规则都能从帧表重算，
+    所以**任何特征集都能同时给出两条基线** —— 原来 det 与 pose 各用一条规则却被
+    并排比较的口径问题，到这里就没了。
     """
-    cache = CACHE[mode]
-    what = f"[{mode}] 特征缓存"
-
-    if not recompute:
-        npz, _meta = load_npz(cache, FEAT_SPEC[mode], what=what)
-        names = item_names(npz)
-        if not names:
-            raise SystemExit(f"{what}里没有任何视频条目：{rel(cache)}\n"
-                             f"  → 加 --recompute 重新生成")
-        check_dims(npz, names, FEAT_DIM[mode], what=what, path=cache)
-        return {k: {"feats": npz[k], "sf": npz[f"{k}_sf"],
-                    "label": float(npz[f"{k}_label"][0])} for k in names}
-
-    print(f"提取特征 [{mode}]（70 段 × 每帧{'检测+姿态' if mode == 'pose' else '仅检测'}）"
-          f"→ {rel(cache)}")
-    data = extract_features(mode)
-    if not data:
-        raise SystemExit(f"[{mode}] 未提取到任何视频，检查 {rel(DATA_DIR)} 下的 *.mp4")
-    save_npz(cache, FEAT_SPEC[mode], {
-        **{k: v["feats"] for k, v in data.items()},
-        **{f"{k}_sf": v["sf"] for k, v in data.items()},
-        **{f"{k}_label": np.array([v["label"]]) for k, v in data.items()},
-    }, n_videos=len(data))
-    print(f"  已保存 {len(data)} 段（特征集 {FEATSET[mode]}，"
-          f"指纹 {spec_sha1(FEAT_SPEC[mode])}）")
-    return data
+    table = gf.load_frame_table(frameset)
+    out: dict[str, dict[str, float]] = {r: {} for r in gf.SF_RULES}
+    for k in keys:
+        sfs = gf.single_frame_baselines(table[k])
+        for rule in gf.SF_RULES:
+            out[rule][k] = float(sfs[rule].mean())
+    return out
 
 
 # ────────────────────────── 2. 滑窗 + 划分 + 模型 + 训练 ──────────────────────────
@@ -314,31 +204,33 @@ def eval_acc(model, x, y):
     return ((p >= 0.5).astype(int) == y.astype(int)).mean()
 
 
-def save_checkpoint(path, model, mode: str) -> None:
+def save_checkpoint(path, model, featset: str) -> None:
     """保存权重 + 身份证（特征集名 / 指纹 / 输入维度 / 网络结构）。
 
     为什么不能只存裸 state_dict：**维度恰好一致时它会静默加载成功**（例如同一
     维度内调换了特征顺序），模型照跑不报错，只有指纹能拦住。维度不一致时 torch
     自己会抛 RuntimeError，但信息是 `size mismatch` 这种天书。
     """
+    fs = gf.FEATSETS[featset]
     torch.save({"state_dict": model.state_dict(),
-                "featset": FEATSET[mode],
-                "feat_spec_sha1": spec_sha1(FEAT_SPEC[mode]),
-                "in_dim": FEAT_DIM[mode],
+                "featset": featset,
+                "feat_spec_sha1": spec_sha1(fs.spec),
+                "in_dim": fs.dim,
                 "hidden": HIDDEN, "layers": LAYERS,
                 "window": WINDOW, "stride": STRIDE}, path)
 
 
-def load_checkpoint(path, mode: str):
+def load_checkpoint(path, featset: str):
     """加载权重并校验身份（供 T0.4 的 edge_node 复用；本轮实验流程也用它做回读校验）。"""
+    fs = gf.FEATSETS[featset]
     ckpt = torch.load(path, map_location="cpu")
-    want = spec_sha1(FEAT_SPEC[mode])
-    if ckpt.get("feat_spec_sha1") != want or ckpt.get("in_dim") != FEAT_DIM[mode]:
+    want = spec_sha1(fs.spec)
+    if ckpt.get("feat_spec_sha1") != want or ckpt.get("in_dim") != fs.dim:
         raise SystemExit(
             f"权重与当前特征集不匹配：{rel(path)}\n"
             f"  权重：特征集 {ckpt.get('featset')} / 指纹 {ckpt.get('feat_spec_sha1')} / "
             f"{ckpt.get('in_dim')} 维\n"
-            f"  当前：特征集 {FEATSET[mode]} / 指纹 {want} / {FEAT_DIM[mode]} 维"
+            f"  当前：特征集 {featset} / 指纹 {want} / {fs.dim} 维"
         )
     model = FallGRU(ckpt["in_dim"], ckpt.get("hidden", HIDDEN), ckpt.get("layers", LAYERS))
     model.load_state_dict(ckpt["state_dict"])
@@ -347,10 +239,6 @@ def load_checkpoint(path, mode: str):
 
 
 # ────────────────────────── 3. 评估 ──────────────────────────
-
-# 单帧基线在两种模式下用的规则本来就不同，报告里必须写明是哪一条
-# （det 走契约的 severity 阈值，pose 走 judge 的框+姿态融合判定）。
-SF_RULE = {"det": "severity>=0.5", "pose": "judge(框+姿态融合)"}
 
 
 def build_windows(data: dict, videos) -> dict:
@@ -376,9 +264,19 @@ def window_probs(model, windows: dict) -> dict:
     return out
 
 
-def run_mode(mode: str, data: dict, seed: int = SEED, verbose: bool = True) -> dict:
+#: 单帧基线规则的短名（用于指标键名）
+SF_SLUG = {"severity>=0.5": "severity", "judge(框+姿态融合)": "judge"}
+#: 各模式的主口径（保持与以往结果可比：det 看 severity，pose 看 judge）
+PRIMARY_SF = {"det": "severity", "pose": "judge"}
+
+
+def run_mode(featset: str, data: dict, bases: dict, seed: int = SEED,
+             verbose: bool = True) -> dict:
+    fs = gf.FEATSETS[featset]
+    mode = fs.mode
     if verbose:
-        print(f"\n########## 特征源 [{mode}]（{FEAT_DIM[mode]} 维/帧）· seed={seed} ##########")
+        print(f"\n########## 特征集 [{featset}]（{fs.dim} 维/帧，帧表 {fs.frames}）"
+              f"· seed={seed} ##########")
     train_videos, test_videos = split_videos(data, seed)
 
     # 窗口只切一次，训练/测试/评分共用。旧版把测试集切了 3 遍（两个列表推导各一遍
@@ -387,8 +285,7 @@ def run_mode(mode: str, data: dict, seed: int = SEED, verbose: bool = True) -> d
     test_win = build_windows(data, test_videos)
     if not train_win or not test_win:
         raise SystemExit(
-            f"[{mode}] 窗口为空：检查 data/datasets/URFD 是否就位、"
-            f"以及视频长度是否都短于 WINDOW={WINDOW} 帧"
+            f"[{featset}] 窗口为空：检查视频是否都短于 WINDOW={WINDOW} 帧"
         )
     train_x = np.concatenate([w for w, _ in train_win.values()])
     train_y = np.concatenate([l for _, l in train_win.values()])
@@ -398,16 +295,16 @@ def run_mode(mode: str, data: dict, seed: int = SEED, verbose: bool = True) -> d
         print(f"设备 {DEVICE} · 训练 {len(train_videos)} 视频 / 测试 {len(test_videos)} 视频 · "
               f"训练窗口 {len(train_x)} 条 / 测试窗口 {len(test_x)} 条")
 
-    model = train_model(train_x, train_y, test_x, test_y, FEAT_DIM[mode], seed, verbose)
+    model = train_model(train_x, train_y, test_x, test_y, fs.dim, seed, verbose)
+    ckpt = model_path(featset)
     if seed == 0:  # 只保留 seed=0 的模型文件
-        save_checkpoint(SAVE_MODEL[mode], model, mode)
-        load_checkpoint(SAVE_MODEL[mode], mode)  # 回读校验：让保存路径也有测试守着
+        save_checkpoint(ckpt, model, featset)
+        load_checkpoint(ckpt, featset)  # 回读校验：让保存路径也有测试守着
 
     # ── 视频级判定 ──
     labels = np.array([data[v]["label"] for v in test_videos])
     # 每段测试视频的窗口数（长度 ∝ 视频时长；这是"取 max 聚合"偏置的来源，必须报出来）
     n_win = np.array([len(test_win[v][0]) if v in test_win else 0 for v in test_videos])
-    sf_scores = np.array([float(data[v]["sf"].mean()) for v in test_videos])  # 单帧:触发帧占比
     probs = window_probs(model, test_win)
     # 三种聚合同时算：max 会把"整段视频是否跌倒"交给最像跌倒的那个窗口，是口径最松、
     # 也最容易受视频长度影响的选法（窗口数 3~38，长视频机会多）；mean 会被大量正常帧
@@ -417,51 +314,53 @@ def run_mode(mode: str, data: dict, seed: int = SEED, verbose: bool = True) -> d
 
     # AUC 走 common.metrics：并列分数按秩公式处理（旧的 np.argsort+trapz 在并列时
     # 给出的是排序的副产品而非确定值，见 src/common/metrics.py 顶部说明）。
-    auc_sf = roc_auc(labels, sf_scores)
     auc_gs = {how: roc_auc(labels, s) for how, s in gs_scores.items()}
-    fpr_sf, tpr_sf = roc_curve(labels, sf_scores)
     gs_curves = {how: roc_curve(labels, s) for how, s in gs_scores.items()}
     fpr_gs, tpr_gs = gs_curves["max"]
-    ties = ties_report(labels, sf_scores)
 
-    sf_v = dict(zip(test_videos, sf_scores))
-    base_tp = sum(1 for n in test_videos if data[n]["label"] == 1 and sf_v[n] >= SF_RATIO_THRES)
-    base_fp = sum(1 for n in test_videos if data[n]["label"] == 0 and sf_v[n] >= SF_RATIO_THRES)
+    # ── 单帧基线：两条规则都报（任何特征集都能给出这两条，口径不再混）──
+    sf = {slug: np.array([bases[rule][v] for v in test_videos])
+          for rule, slug in SF_SLUG.items()}
+    auc_sf = {slug: roc_auc(labels, s) for slug, s in sf.items()}
+    sf_curves = {slug: roc_curve(labels, s) for slug, s in sf.items()}
+    primary = PRIMARY_SF[mode]
+    fpr_sf, tpr_sf = sf_curves[primary]
+    ties = ties_report(labels, sf[primary])
+
     if verbose:
-        print(f"\n  [视频级对比] 单帧基线(规则 {SF_RULE[mode]}, 阈值 {SF_RATIO_THRES}): "
-              f"检出 {base_tp}/{(labels == 1).sum()} · 误报 {base_fp}/{(labels == 0).sum()}")
-        print(f"  单帧基线分数并列体检: {format_ties(ties)}")
-        print(f"  ROC-AUC（0.5=随机）: 单帧={auc_sf:.3f} → GRU(max)={auc_gs['max']:.3f}")
+        for rule, slug in SF_SLUG.items():
+            s = sf[slug]
+            tp = sum(1 for n in test_videos
+                     if data[n]["label"] == 1 and bases[rule][n] >= SF_RATIO_THRES)
+            fp = sum(1 for n in test_videos
+                     if data[n]["label"] == 0 and bases[rule][n] >= SF_RATIO_THRES)
+            mark = " ←主口径" if slug == primary else ""
+            print(f"  单帧基线[{rule:18s}] 检出 {tp}/{(labels == 1).sum()} · "
+                  f"误报 {fp}/{(labels == 0).sum()} · AUC={auc_sf[slug]:.3f}{mark}")
+        print(f"  基线分数并列体检（主口径）: {format_ties(ties)}")
+        print(f"  ROC-AUC（0.5=随机）: 单帧({primary})={auc_sf[primary]:.3f} → "
+              f"GRU(max)={auc_gs['max']:.3f}")
         for how in DEFAULT_AGGS:
             f, t = gs_curves[how]
             print(f"    聚合 [{how:8s}] AUC={auc_gs[how]:.3f}  "
                   f"@FPR0={tpr_at_fpr(f, t, 0.0) * 100:.0f}%  "
                   f"@FPR≤0.1={tpr_at_fpr(f, t, 0.1) * 100:.0f}%")
-        for target in (0.0, 0.1, 0.2):
-            print(f"  FPR≤{target:.1f} 时检出率: 单帧={tpr_at_fpr(fpr_sf, tpr_sf, target) * 100:.0f}%  "
-                  f"GRU(max)={tpr_at_fpr(fpr_gs, tpr_gs, target) * 100:.0f}%")
         print(f"  测试视频窗口数: {n_win.min()}~{n_win.max()}（相差 "
               f"{n_win.max() / max(n_win.min(), 1):.0f} 倍，max 聚合下长视频机会更多）")
-        print(f"  模型已存: {SAVE_MODEL[mode]}")
+        if seed == 0:
+            print(f"  模型已存: {rel(ckpt)}")
 
-    # 对齐基线误报率的工作点（GRU 单点，取 max 聚合），供最终汇总
-    gs_max = gs_scores["max"]
-    base_fpr = float((sf_scores[labels == 0] >= SF_RATIO_THRES).mean()) if (labels == 0).sum() else 0.0
-    thr = min(sorted(set(gs_max)), key=lambda t: abs(float((gs_max[labels == 0] >= t).mean()) - base_fpr))
-    gv = dict(zip(test_videos, gs_max >= thr))
-    g_tp = sum(1 for n in test_videos if data[n]["label"] == 1 and gv[n])
-    g_fp = sum(1 for n in test_videos if data[n]["label"] == 0 and gv[n])
-    if verbose:
-        print(f"  GRU(对齐基线误报,阈值={thr:.2f}): 检出 {g_tp}/{(labels == 1).sum()} · "
-              f"误报 {g_fp}/{(labels == 0).sum()}")
-
-    out = {"auc_sf": auc_sf, "auc_gs": auc_gs["max"],
+    out = {"auc_sf": auc_sf[primary], "auc_gs": auc_gs["max"],
            "tpr0_sf": tpr_at_fpr(fpr_sf, tpr_sf, 0.0),
            "tpr0_gs": tpr_at_fpr(fpr_gs, tpr_gs, 0.0),
            "tpr1_gs": tpr_at_fpr(fpr_gs, tpr_gs, 0.1),
            "tpr1_sf": tpr_at_fpr(fpr_sf, tpr_sf, 0.1),
            "ties_max_group": ties["max_group"],
            "n_win_min": int(n_win.min()), "n_win_max": int(n_win.max())}
+    for slug in SF_SLUG.values():  # 两条基线各自一套
+        f, t = sf_curves[slug]
+        out[f"auc_sf_{slug}"] = auc_sf[slug]
+        out[f"tpr0_sf_{slug}"] = tpr_at_fpr(f, t, 0.0)
     for how in DEFAULT_AGGS:  # 聚合敏感性：每个聚合各一套指标
         f, t = gs_curves[how]
         out[f"auc_gs_{how}"] = auc_gs[how]
@@ -474,8 +373,8 @@ def config_snapshot() -> dict:
     return {
         "window": WINDOW, "stride": STRIDE, "hidden": HIDDEN, "layers": LAYERS,
         "epochs": EPOCHS, "batch": BATCH, "lr": LR, "seed": SEED,
-        "test_frac": TEST_FRAC, "severity_suspect": SEVERITY_SUSPECT,
-        "sf_ratio_thres": SF_RATIO_THRES, "aggs": list(DEFAULT_AGGS),
+        "test_frac": TEST_FRAC, "sf_ratio_thres": SF_RATIO_THRES,
+        "aggs": list(DEFAULT_AGGS), "sf_rules": list(gf.SF_RULES),
     }
 
 
@@ -522,49 +421,73 @@ def mean_of(mlist, key):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--recompute", action="store_true", help="强制重新提取特征")
+    ap.add_argument("--featsets", nargs="+", default=list(gf.FEATSETS),
+                    choices=list(gf.FEATSETS),
+                    help=f"要跑的特征集（默认全部）：{' '.join(gf.FEATSETS)}")
     ap.add_argument("--seeds", type=int, default=5, help="随机 seed 数（每个 seed 重新划分+重训）")
     ap.add_argument("--out-json", type=Path, default=RESULTS_DIR / "metrics_latest.json",
                     help="指标落盘路径（默认 experiments/results/metrics_latest.json）")
     args = ap.parse_args()
     seeds = args.seeds
 
-    metrics = {}  # mode -> [每 seed 的指标 dict]
-    for mode in ("det", "pose"):
-        data = load_or_extract(mode, args.recompute)
-        print(f"\n########## 特征源 [{mode}] · {seeds} 个 seed ##########")
+    metrics: dict[str, list] = {}   # 特征集 -> [每 seed 的指标 dict]
+    bases_cache: dict[str, dict] = {}   # 帧表 -> 单帧基线（同一张表被多个特征集复用）
+    for featset in args.featsets:
+        fs = gf.FEATSETS[featset]
+        data = load_feats(featset)
+        if fs.frames not in bases_cache:
+            bases_cache[fs.frames] = load_baselines(fs.frames, data.keys())
+        bases = bases_cache[fs.frames]
+        print(f"\n########## 特征集 [{featset}] · {seeds} 个 seed ##########")
         mlist = []
         for s in range(seeds):
-            r = run_mode(mode, data, seed=s, verbose=(seeds == 1))
+            r = run_mode(featset, data, bases, seed=s, verbose=(seeds == 1))
             mlist.append(r)
-            print(f"  seed{s}: 单帧@FPR0={r['tpr0_sf'] * 100:.0f}%  GRU@FPR0={r['tpr0_gs'] * 100:.0f}%  "
+            print(f"  seed{s}: 单帧@FPR0={r['tpr0_sf'] * 100:.0f}%  "
+                  f"GRU@FPR0={r['tpr0_gs'] * 100:.0f}%  "
                   f"GRU@FPR≤0.1={r['tpr1_gs'] * 100:.0f}%  "
                   f"AUC 单帧→GRU={r['auc_sf']:.3f}→{r['auc_gs']:.3f}  "
                   f"(基线并列组最大 {r['ties_max_group']})")
-        metrics[mode] = mlist
+        metrics[featset] = mlist
+
+    names = list(metrics)
 
     print(f"\n\n========== 稳健性汇总（mean±std over {seeds} seeds） ==========")
-    print(f"{'特征源':6s} {'单帧检出@FPR0':>16s} {'GRU@FPR0':>12s} {'GRU@FPR≤0.1':>12s} "
-          f"{'AUC单帧':>9s} {'AUC-GRU':>9s}")
-    for mode in ("det", "pose"):
-        mlist = metrics[mode]
-        print(f"{mode:6s} {mstd(mlist, 'tpr0_sf'):>16s} {mstd(mlist, 'tpr0_gs'):>12s} "
-              f"{mstd(mlist, 'tpr1_gs'):>12s} {mean_of(mlist, 'auc_sf'):8.3f} "
-              f"{mean_of(mlist, 'auc_gs'):8.3f}")
+    print(f"{'特征集':10s} {'维':>3s} {'单帧检出@FPR0':>15s} {'GRU@FPR0':>11s} "
+          f"{'GRU@FPR≤0.1':>12s} {'AUC单帧':>9s} {'AUC-GRU':>9s}")
+    for name in names:
+        mlist = metrics[name]
+        print(f"{name:10s} {gf.FEATSETS[name].dim:3d} {mstd(mlist, 'tpr0_sf'):>15s} "
+              f"{mstd(mlist, 'tpr0_gs'):>11s} {mstd(mlist, 'tpr1_gs'):>12s} "
+              f"{mean_of(mlist, 'auc_sf'):8.3f} {mean_of(mlist, 'auc_gs'):8.3f}")
+
     print(f"\n\n========== 聚合方式敏感性（同一批 GRU 窗口分数，只换汇总方式） ==========")
     print("窗口 → 视频级分数的汇总方式不同，结论会不同；单帧基线未参与，纯 GRU 侧对照。")
-    print(f"{'特征源':6s} {'聚合':<10s} {'AUC':>16s} {'检出@FPR0':>16s}")
-    for mode in ("det", "pose"):
-        mlist = metrics[mode]
+    print(f"{'特征集':10s} {'聚合':<10s} {'AUC':>16s} {'检出@FPR0':>16s}")
+    for name in names:
+        mlist = metrics[name]
         for how in DEFAULT_AGGS:
-            print(f"{mode:6s} {how:<10s} {mstd(mlist, f'auc_gs_{how}', scale=1.0, fmt='{:.3f}±{:.3f}'):>16s} "
+            print(f"{name:10s} {how:<10s} "
+                  f"{mstd(mlist, f'auc_gs_{how}', scale=1.0, fmt='{:.3f}±{:.3f}'):>16s} "
                   f"{mstd(mlist, f'tpr0_gs_{how}'):>16s}")
-    nw = [(r["n_win_min"], r["n_win_max"]) for r in metrics["det"]]
+
+    print(f"\n\n========== 单帧基线两条规则对比（同一批测试视频，不含任何时序） ==========")
+    print("原来 det 用 severity、pose 用 judge，两条不同规则却被并排比较；现在两边都给。")
+    print(f"{'特征集':10s} {'规则':<18s} {'AUC':>16s} {'检出@FPR0':>16s}")
+    for name in names:
+        mlist = metrics[name]
+        for slug in SF_SLUG.values():
+            print(f"{name:10s} {slug:<18s} "
+                  f"{mstd(mlist, f'auc_sf_{slug}', scale=1.0, fmt='{:.3f}±{:.3f}'):>16s} "
+                  f"{mstd(mlist, f'tpr0_sf_{slug}'):>16s}")
+
+    nw = [(r["n_win_min"], r["n_win_max"]) for r in metrics[names[0]]]
     print(f"\n每段测试视频的窗口数范围: {min(a for a, _ in nw)}~{max(b for _, b in nw)}"
           f"（max 聚合下窗口多的视频天然机会更多，这是与标签无关的长度偏置）")
 
-    print(f"\n注：det=仅检测(边缘端可用，{FEAT_DIM['det']}维)，pose=检测+姿态(对照组，{FEAT_DIM['pose']}维)。")
-    print("若 det 的 GRU 稳定接近/超过 pose，说明边缘端只靠检测特征+时序就够，可省去姿态卸载。")
+    print("\n注：det.* 只用检测特征（边缘端 RK3588 NPU 上便宜），pose.* 额外带姿态几何量"
+          "（需远端，用来回答「姿态值不值得卸载」）。")
+    print("det.v2 与 pose.v2 的前 8 维完全相同，只差 2 个姿态量 —— 这样对比才是公平消融。")
     print("AUC 按并列取平均秩计算（common.metrics），单帧基线分数存在大量并列，"
           "旧的不稳定排序实现会给出偏高的任意值。")
 
@@ -579,10 +502,13 @@ def main():
         "env": env_snapshot(),
         "config": config_snapshot(),
         "seeds": seeds,
-        "featset": {m: {"dim": FEAT_DIM[m], "single_frame_rule": SF_RULE[m],
-                        "cache": str(CACHE[m].relative_to(ROOT))} for m in metrics},
+        "featset": {n: {"dim": gf.FEATSETS[n].dim, "names": list(gf.FEATSETS[n].names),
+                        "frames": gf.FEATSETS[n].frames,
+                        "feat_spec_sha1": spec_sha1(gf.FEATSETS[n].spec),
+                        "primary_sf_rule": PRIMARY_SF[gf.FEATSETS[n].mode],
+                        "cache": str(gf.FEAT_CACHE[n].relative_to(ROOT))} for n in names},
         "per_seed": metrics,
-        "summary": {m: _summary(metrics[m]) for m in metrics},
+        "summary": {n: _summary(metrics[n]) for n in names},
     }
     write_metrics_json(args.out_json, payload)
     print(f"\n指标已落盘: {rel(args.out_json)}")

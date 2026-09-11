@@ -143,11 +143,18 @@ def draw_pose(img, kxy, kconf):
 
 
 def empty_row() -> dict:
-    """一帧日志行的初始值（字段顺序与 ROW_FIELDS 一致）。"""
+    """一帧日志行的初始值（字段顺序与 ROW_FIELDS 一致）。
+
+    另外带两个 `*_raw` 字段（不进 ROW_FIELDS、不写 CSV）：几何量的**原始精度**值。
+    `judge()` 判定时用的就是原始值，而 CSV 里那两列是给人看的四舍五入结果。
+    若下游（原始帧表）只拿得到四舍五入值，阈值边界上会翻转 —— 实测 45.04° 存成
+    45.0，`>45°` 的判定从命中变不命中，导致 4/70 段单帧基线对不上。
+    """
     return {"frame": 0, "has_event": 0, "event_type": 0, "confidence": 0.0, "severity": 0.0,
             "bbox_x1": 0, "bbox_y1": 0, "bbox_x2": 0, "bbox_y2": 0,
             "pose_invoked": 0, "aspect_ratio": float("nan"),
-            "torso_angle": "", "hip_ankle_ratio": "", "fall": 0, "reason": ""}
+            "torso_angle": "", "hip_ankle_ratio": "", "fall": 0, "reason": "",
+            "torso_angle_raw": float("nan"), "hip_ankle_ratio_raw": float("nan")}
 
 
 def process_frame(frame, det_model, pose_model, always_pose):
@@ -186,9 +193,15 @@ def process_frame(frame, det_model, pose_model, always_pose):
                 i = pick_person(kxy, kconf, (cx, cy))
                 geom = fall_geometry(kxy[i], kconf[i], (pix[2] - pix[0], pix[3] - pix[1]) if ev.has_event else (1.0, 1.0))
                 if geom is not None:
+                    # CSV 展示列：保留旧精度（1 / 3 位小数），格式不变
                     row["torso_angle"] = f"{geom['torso_angle']:.1f}"
                     if geom["hip_ankle_ratio"] is not None:
                         row["hip_ankle_ratio"] = f"{geom['hip_ankle_ratio']:.3f}"
+                    # 判定/特征用列：原始精度。judge() 本来就用原始值，下游的原始帧表
+                    # 也必须拿到原始值，否则在阈值边界上判定会翻转。
+                    row["torso_angle_raw"] = float(geom["torso_angle"])
+                    if geom["hip_ankle_ratio"] is not None:
+                        row["hip_ankle_ratio_raw"] = float(geom["hip_ankle_ratio"])
                 fall, reason = judge(ev, geom, row["aspect_ratio"])
                 row.update(fall=int(fall), reason=reason)
                 draw_pose(frame, kxy[i], kconf[i])
@@ -206,11 +219,15 @@ def write_csv_rows(path, rows, fieldnames=None):
 
     表头取自 ROW_FIELDS 而非 rows[0].keys()：视频一帧都没读出来时 rows 为空，
     旧写法会 IndexError；现在会写出一份只有表头的「0 帧」证据。
+
+    rows 里带有 `*_raw` 等不进 CSV 的字段，所以显式按列投影写出，
+    保持 CSV 的列与顺序与旧版完全一致。
     """
+    cols = fieldnames or ROW_FIELDS
     with open(path, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=fieldnames or ROW_FIELDS)
+        w = csv.DictWriter(f, fieldnames=cols)
         w.writeheader()
-        w.writerows(rows)
+        w.writerows({k: r[k] for k in cols} for r in rows)
 
 
 def main():

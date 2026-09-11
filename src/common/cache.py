@@ -65,7 +65,19 @@ def spec_diff(cached: dict, expect: dict) -> dict:
 
 
 def save_npz(path, spec: dict, arrays: dict, **extra_meta) -> dict:
-    """保存带版本信息的 npz。`arrays` 是 {key: ndarray}（沿用原有键名约定）。"""
+    """保存带版本信息的 npz。
+
+    `arrays` 是 {key: ndarray}（要存的数据），`**extra_meta` 是**标量元数据**。
+    两者极易混淆 —— 把数组误传成元数据会一路走到 json.dumps 才报一个难懂的
+    TypeError，所以这里提前拦下并说清楚该放哪里。
+    """
+    bad = [k for k, v in extra_meta.items() if isinstance(v, np.ndarray)]
+    if bad:
+        raise TypeError(
+            f"元数据只能是标量，但 {bad} 是 ndarray。数组请放进 arrays 参数：\n"
+            f"    save_npz(path, spec, {{**arrays, 'xxx': arr}})   # 对\n"
+            f"    save_npz(path, spec, arrays, xxx=arr)          # 错（会被当元数据）"
+        )
     path = Path(path)
     meta = {"format": CACHE_FORMAT, "spec": spec, "spec_sha1": spec_sha1(spec)}
     meta.update(extra_meta)
