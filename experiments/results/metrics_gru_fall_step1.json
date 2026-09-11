@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-11T08:13:42+00:00",
+  "generated_at": "2026-09-11T08:16:35+00:00",
   "script": "scripts/train_gru_fall.py",
   "env": {
     "python": "3.10.20",
@@ -8,7 +8,7 @@
     "ultralytics": "8.2.103",
     "cuda": true,
     "device": "NVIDIA GeForce RTX 2050",
-    "git_commit": "12cdb8cb4700adfcda984fff83cd8553f5fb6940",
+    "git_commit": "1b88ea552352574399dcd06696d6e024add0e580",
     "git_branch": "event-refactor",
     "git_dirty": true
   },

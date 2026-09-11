@@ -103,8 +103,44 @@ def feats_from_pose(row) -> np.ndarray:
     return np.nan_to_num(f, nan=0.0)
 
 
+def rel(p: Path) -> Path | str:
+    """尽量显示成仓库相对路径；不在仓库内（或本来就缺失）时原样返回。
+
+    报错信息本身绝不能因为路径转换再抛一次异常 —— 那样真正的病因就被埋了。
+    """
+    try:
+        return Path(p).resolve().relative_to(ROOT)
+    except (ValueError, OSError):
+        return p
+
+
+def require_inputs() -> None:
+    """提取特征前的输入检查。
+
+    没有这一步时，数据缺失会在后面 `np.concatenate([])` 处抛一个与病因无关的
+    ValueError，新协作者（clone 之后必然没有那 100MB 数据集）会一脸茫然。
+    """
+    problems = []
+    if not DATA_DIR.is_dir() or not any(DATA_DIR.glob("*/*.mp4")):
+        problems.append(
+            f"数据集缺失或为空：{rel(DATA_DIR)}\n"
+            "      下载：https://gitcode.com/Universal-Tool/fa314 （URFD_video.zip，国内可直连）\n"
+            "      解压出 URFD/{fall,adl}/*.mp4（30 段跌倒 + 40 段日常）放到该目录，详见 docs/08 §1"
+        )
+    for name in ("yolov8n.pt", "yolov8n-pose.pt"):
+        if not (dfv.PT_DIR / name).exists():
+            problems.append(
+                f"模型缺失：{rel(dfv.PT_DIR / name)}"
+                "（ultralytics 首次加载时会自动下载到该目录）"
+            )
+    if problems:
+        raise SystemExit("输入检查未通过：\n  - " + "\n  - ".join(problems)
+                         + "\n\n（若只是想用已有缓存复现旧结果，请勿加 --recompute。）")
+
+
 def extract_features(mode: str) -> dict:
     """遍历 70 段视频，每段返回 (feats(T,F), sf(T,)单帧判定, label)。"""
+    require_inputs()
     det = YOLO(str(dfv.PT_DIR / "yolov8n.pt"))
     pose = YOLO(str(dfv.PT_DIR / "yolov8n-pose.pt")) if mode == "pose" else None
     out = {}
@@ -454,11 +490,7 @@ def main():
         "summary": {m: _summary(metrics[m]) for m in metrics},
     }
     write_metrics_json(args.out_json, payload)
-    try:  # 用户可能传相对路径，也可能传到仓库外
-        shown = args.out_json.resolve().relative_to(ROOT)
-    except ValueError:
-        shown = args.out_json
-    print(f"\n指标已落盘: {shown}")
+    print(f"\n指标已落盘: {rel(args.out_json)}")
 
 
 if __name__ == "__main__":
