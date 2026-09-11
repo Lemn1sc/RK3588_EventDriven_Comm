@@ -31,6 +31,7 @@ det.v2 与 pose.v2 的前 8 维完全相同、只差 2 个姿态量，所以「�
 import argparse
 import json
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -173,7 +174,9 @@ class FallGRU(nn.Module):
         return self.head(out[:, -1]).squeeze(-1)  # 末帧隐状态 → logit
 
 
-def train_model(train_x, train_y, test_x, test_y, in_dim, seed=SEED, verbose=True):
+def train_model(train_x, train_y, in_dim, seed=SEED, test_x=None, test_y=None, verbose=True):
+    """训练。test_x/test_y 只用于打印中途准确率，可为 None（LOVO 的每折测试集只有
+    一段视频、只有一类标签，窗口级准确率无意义，就不传）。"""
     torch.manual_seed(seed)
     model = FallGRU(in_dim).to(DEVICE)
     opt = torch.optim.Adam(model.parameters(), lr=LR)
@@ -191,7 +194,7 @@ def train_model(train_x, train_y, test_x, test_y, in_dim, seed=SEED, verbose=Tru
             loss.backward()
             opt.step()
             total += loss.item() * len(idx)
-        if verbose and (epoch % 10 == 0 or epoch == 1):
+        if verbose and test_x is not None and (epoch % 10 == 0 or epoch == 1):
             acc = eval_acc(model, test_x, test_y)
             print(f"  epoch {epoch:3d}  train_loss={total / len(tx):.4f}  test_acc={acc * 100:.1f}%")
     return model
@@ -295,7 +298,7 @@ def run_mode(featset: str, data: dict, bases: dict, seed: int = SEED,
         print(f"设备 {DEVICE} · 训练 {len(train_videos)} 视频 / 测试 {len(test_videos)} 视频 · "
               f"训练窗口 {len(train_x)} 条 / 测试窗口 {len(test_x)} 条")
 
-    model = train_model(train_x, train_y, test_x, test_y, fs.dim, seed, verbose)
+    model = train_model(train_x, train_y, fs.dim, seed, test_x, test_y, verbose)
     ckpt = model_path(featset)
     if seed == 0:  # 只保留 seed=0 的模型文件
         save_checkpoint(ckpt, model, featset)
@@ -368,6 +371,100 @@ def run_mode(featset: str, data: dict, bases: dict, seed: int = SEED,
     return out
 
 
+# ────────────────────── 4. 留一视频交叉验证（LOVO）──────────────────────
+#
+# 为什么需要它：随机划分下每个 seed 的测试集只有 8 段跌倒视频，于是
+#   AUC 的最小刻度 = 1/(8×10) = 0.0125       @FPR=0 的刻度 = 1/8 = 12.5%
+# 在这个尺度上「谁比谁高 0.025」毫无意义 —— 实测 5 个 seed 里符号翻转 2 次。
+#
+# LOVO 让每段视频轮流当测试集，把 out-of-fold 分数拼起来算**一次** ROC：
+# 分母变成 30 正 × 40 负 = 1200 对 → AUC 刻度 0.00083，比原来细 15 倍。
+#
+# 注意是「池化后只算一次 ROC」，不是「对 70 个单折 AUC 求平均」——
+# 单折的测试集只有一段视频、只有一类标签，AUC 无定义。
+def run_lovo(featset: str, data: dict, bases: dict, verbose: bool = True) -> dict:
+    fs = gf.FEATSETS[featset]
+    keys = sorted(data)
+    wins = build_windows(data, keys)   # 每段只切一次，70 折复用
+    if not wins:
+        raise SystemExit(f"[{featset}] 没有任何视频能切出窗口（都短于 WINDOW={WINDOW} 帧）")
+
+    print(f"\n########## LOVO · 特征集 [{featset}]（{fs.dim} 维）· {len(keys)} 折 ##########")
+    oof = {how: {} for how in DEFAULT_AGGS}
+    n_win: dict[str, int] = {}
+    t0 = time.time()
+    for i, held in enumerate(keys, 1):
+        train_keys = [k for k in keys if k != held and k in wins]
+        if len(train_keys) < 2:
+            raise SystemExit("可训练的视频太少，LOVO 无意义")
+        train_x = np.concatenate([wins[k][0] for k in train_keys])
+        train_y = np.concatenate([wins[k][1] for k in train_keys])
+        model = train_model(train_x, train_y, fs.dim, SEED, verbose=False)
+        p = window_probs(model, {held: wins[held]})[held] if held in wins else np.array([])
+        n_win[held] = len(p)
+        for how in DEFAULT_AGGS:
+            oof[how][held] = agg_scores(p, how)
+        if verbose and (i % 10 == 0 or i == len(keys)):
+            el = time.time() - t0
+            print(f"  [{i}/{len(keys)}] 用时 {el:.0f}s  "
+                  f"预计剩余 {el / i * (len(keys) - i) / 60:.1f}min", flush=True)
+
+    labels = np.array([data[k]["label"] for k in keys])
+    n_pos, n_neg = int((labels == 1).sum()), int((labels == 0).sum())
+    gs = {how: np.array([oof[how][k] for k in keys]) for how in DEFAULT_AGGS}
+    auc = {how: roc_auc(labels, s) for how, s in gs.items()}
+    curves = {how: roc_curve(labels, s) for how, s in gs.items()}
+    fpr_gs, tpr_gs = curves["max"]
+
+    sf = {slug: np.array([bases[rule][k] for k in keys]) for rule, slug in SF_SLUG.items()}
+    auc_sf = {slug: roc_auc(labels, s) for slug, s in sf.items()}
+    sf_curves = {slug: roc_curve(labels, s) for slug, s in sf.items()}
+    primary = PRIMARY_SF[fs.mode]
+
+    if verbose:
+        print(f"\n  池化后 {len(keys)} 段（{n_pos} 正 / {n_neg} 负）→ "
+              f"AUC 最小刻度 1/{n_pos * n_neg} = {1 / (n_pos * n_neg):.5f}"
+              f"（随机划分下是 1/80 = 0.0125，细了 {n_pos * n_neg / 80:.0f} 倍）")
+        for rule, slug in SF_SLUG.items():
+            f, t = sf_curves[slug]
+            print(f"  单帧基线[{rule:18s}] AUC={auc_sf[slug]:.4f}  "
+                  f"@FPR0={tpr_at_fpr(f, t, 0.0) * 100:.1f}%")
+        for how in DEFAULT_AGGS:
+            f, t = curves[how]
+            print(f"  GRU [{how:8s}] AUC={auc[how]:.4f}  @FPR0={tpr_at_fpr(f, t, 0.0) * 100:.1f}%  "
+                  f"@FPR≤0.1={tpr_at_fpr(f, t, 0.1) * 100:.1f}%")
+
+    def at_zero_fpr(scores) -> list[str]:
+        """零误报工作点能捞到的跌倒视频：分数严格高于**所有**日常视频者。
+
+        记录具体是哪几段（而不是只记个数），这样两个特征集之间可以做配对比较：
+        「姿态多捞回了哪几段」比「高了 0.025 个 AUC」可解释得多。
+        """
+        s = np.asarray(scores, dtype=np.float64)
+        thr = s[labels == 0].max()
+        return sorted(k for k, v in zip(keys, s) if data[k]["label"] == 1 and v > thr)
+
+    out = {"auc_sf": auc_sf[primary], "auc_gs": auc["max"],
+           "tpr0_sf": tpr_at_fpr(*sf_curves[primary], 0.0),
+           "tpr0_gs": tpr_at_fpr(fpr_gs, tpr_gs, 0.0),
+           "tpr1_gs": tpr_at_fpr(fpr_gs, tpr_gs, 0.1),
+           "tpr1_sf": tpr_at_fpr(*sf_curves[primary], 0.1),
+           "ties_max_group": ties_report(labels, sf[primary])["max_group"],
+           "n_win_min": min(n_win.values()), "n_win_max": max(n_win.values()),
+           "hits_at_fpr0": {how: at_zero_fpr(gs[how]) for how in DEFAULT_AGGS},
+           "per_video_score": {how: {k: float(oof[how][k]) for k in keys}
+                               for how in DEFAULT_AGGS}}
+    for slug in SF_SLUG.values():
+        out[f"auc_sf_{slug}"] = auc_sf[slug]
+        out[f"tpr0_sf_{slug}"] = tpr_at_fpr(*sf_curves[slug], 0.0)
+        out.setdefault("hits_at_fpr0", {})[f"sf_{slug}"] = at_zero_fpr(sf[slug])
+    for how in DEFAULT_AGGS:
+        f, t = curves[how]
+        out[f"auc_gs_{how}"] = auc[how]
+        out[f"tpr0_gs_{how}"] = tpr_at_fpr(f, t, 0.0)
+    return out
+
+
 def config_snapshot() -> dict:
     """本次实验的全部可调量。写进 json，避免"改了配置忘了记录"。"""
     return {
@@ -410,8 +507,13 @@ def write_metrics_json(path: Path, payload: dict) -> None:
 
 
 def mstd(mlist, key, scale=100.0, fmt="{:.0f}±{:.0f}"):
-    """mean±std。显式接收列表（旧版用闭包读循环变量 mode，多特征集扩展必踩坑）。"""
+    """mean±std。显式接收列表（旧版用闭包读循环变量 mode，多特征集扩展必踩坑）。
+
+    只有一个样本时（LOVO 只有一趟）不打印意义为 0 的 ±0。
+    """
     a = np.array([r[key] for r in mlist], dtype=np.float64) * scale
+    if len(a) == 1:
+        return fmt.split("±")[0].format(a[0])
     return fmt.format(a.mean(), a.std())
 
 
@@ -425,12 +527,16 @@ def main():
                     choices=list(gf.FEATSETS),
                     help=f"要跑的特征集（默认全部）：{' '.join(gf.FEATSETS)}")
     ap.add_argument("--seeds", type=int, default=5, help="随机 seed 数（每个 seed 重新划分+重训）")
+    ap.add_argument("--protocol", choices=["random", "lovo"], default="random",
+                    help="random=按视频随机划分×N seed；lovo=留一视频交叉验证"
+                         "（70 折，out-of-fold 池化后算一次 ROC，AUC 刻度细 15 倍）")
     ap.add_argument("--out-json", type=Path, default=RESULTS_DIR / "metrics_latest.json",
                     help="指标落盘路径（默认 experiments/results/metrics_latest.json）")
     args = ap.parse_args()
     seeds = args.seeds
+    lovo = args.protocol == "lovo"
 
-    metrics: dict[str, list] = {}   # 特征集 -> [每 seed 的指标 dict]
+    metrics: dict[str, list] = {}   # 特征集 -> [每轮（seed 或 LOVO 一趟）的指标 dict]
     bases_cache: dict[str, dict] = {}   # 帧表 -> 单帧基线（同一张表被多个特征集复用）
     for featset in args.featsets:
         fs = gf.FEATSETS[featset]
@@ -438,6 +544,9 @@ def main():
         if fs.frames not in bases_cache:
             bases_cache[fs.frames] = load_baselines(fs.frames, data.keys())
         bases = bases_cache[fs.frames]
+        if lovo:
+            metrics[featset] = [run_lovo(featset, data, bases)]
+            continue
         print(f"\n########## 特征集 [{featset}] · {seeds} 个 seed ##########")
         mlist = []
         for s in range(seeds):
@@ -451,8 +560,10 @@ def main():
         metrics[featset] = mlist
 
     names = list(metrics)
+    prot_desc = ("LOVO（70 折，out-of-fold 池化后算一次 ROC）" if lovo
+                 else f"mean±std over {seeds} seeds")
 
-    print(f"\n\n========== 稳健性汇总（mean±std over {seeds} seeds） ==========")
+    print(f"\n\n========== 稳健性汇总（{prot_desc}） ==========")
     print(f"{'特征集':10s} {'维':>3s} {'单帧检出@FPR0':>15s} {'GRU@FPR0':>11s} "
           f"{'GRU@FPR≤0.1':>12s} {'AUC单帧':>9s} {'AUC-GRU':>9s}")
     for name in names:
@@ -481,6 +592,38 @@ def main():
                   f"{mstd(mlist, f'auc_sf_{slug}', scale=1.0, fmt='{:.3f}±{:.3f}'):>16s} "
                   f"{mstd(mlist, f'tpr0_sf_{slug}'):>16s}")
 
+    if lovo:
+        print(f"\n\n========== LOVO 配对对比（每段视频都当过一次测试集） ==========")
+        print("LOVO 下每段视频都有 out-of-fold 分数，且各特征集用的是**同一批**折，")
+        print("所以可以直接问：零误报工作点上各自捞回了哪几段跌倒视频。")
+        all_fall = sorted(k for k in metrics[names[0]][0]["per_video_score"]["max"]
+                          if k.startswith("fall/"))
+        print(f"\n跌倒视频共 {len(all_fall)} 段。零误报时各特征集捞回的段数：")
+        hits = {n: set(metrics[n][0]["hits_at_fpr0"]["max"]) for n in names}
+        for n in names:
+            print(f"  {n:10s} {len(hits[n]):2d}/{len(all_fall)}")
+        base = set(metrics[names[0]][0]["hits_at_fpr0"][f"sf_{PRIMARY_SF['det']}"])
+        print(f"  {'单帧基线':10s} {len(base):2d}/{len(all_fall)}（severity 规则）")
+
+        print(f"\n{'对比 (后者 − 前者)':<26s} {'AUC 差':>9s} {'捞回数差':>9s}  "
+              f"后者多捞回 / 少捞回")
+        for a, b in (("det.v1", "det.v2a"), ("det.v2a", "det.v2"),
+                     ("det.v1", "det.v2"), ("pose.v1", "pose.v2"),
+                     ("det.v2", "pose.v2")):
+            if a not in metrics or b not in metrics:
+                print(f"{b} − {a:<16s} {'（本次未跑，跳过）':>29s}")
+                continue
+            ra, rb = metrics[a][0], metrics[b][0]
+            extra, lost = sorted(hits[b] - hits[a]), sorted(hits[a] - hits[b])
+            fmt = lambda xs: ", ".join(x.split("/")[1].replace("-cam0.mp4", "") for x in xs) or "—"
+            print(f"{b} − {a:<16s} {rb['auc_gs'] - ra['auc_gs']:+9.4f} "
+                  f"{len(hits[b]) - len(hits[a]):+9d}  多: {fmt(extra)} | 少: {fmt(lost)}")
+
+        still_missed = sorted(set(all_fall) - hits[names[-1]])
+        print(f"\n所有特征集都捞不回的跌倒视频（{len(still_missed)} 段）："
+              f"{', '.join(x.split('/')[1].replace('-cam0.mp4', '') for x in still_missed) or '—'}")
+        print("这些是数据本身的难例（低位视角下检测器都找不到人），不是模型能解决的。")
+
     nw = [(r["n_win_min"], r["n_win_max"]) for r in metrics[names[0]]]
     print(f"\n每段测试视频的窗口数范围: {min(a for a, _ in nw)}~{max(b for _, b in nw)}"
           f"（max 聚合下窗口多的视频天然机会更多，这是与标签无关的长度偏置）")
@@ -492,16 +635,25 @@ def main():
           "旧的不稳定排序实现会给出偏高的任意值。")
 
     def _summary(mlist):
+        """只对数值型指标求 mean±std。
+
+        per_seed 里还带着 hits_at_fpr0 / per_video_score 这类非数值结果
+        （它们描述"捞回了哪几段"，本来就无法求均值），原样留在 per_seed 里。
+        """
         return {k: {"mean": float(np.mean([r[k] for r in mlist])),
                     "std": float(np.std([r[k] for r in mlist]))}
-                for k in mlist[0]}
+                for k, v in mlist[0].items() if isinstance(v, (int, float))}
 
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "script": "scripts/train_gru_fall.py",
         "env": env_snapshot(),
         "config": config_snapshot(),
-        "seeds": seeds,
+        "protocol": args.protocol,
+        "seeds": (None if lovo else seeds),
+        "note": ("LOVO：每段视频轮流当测试集，out-of-fold 分数池化后算一次 ROC；"
+                 "per_seed 里只有一项" if lovo else
+                 "random：每个 seed 按视频随机划分 52 训练 / 18 测试"),
         "featset": {n: {"dim": gf.FEATSETS[n].dim, "names": list(gf.FEATSETS[n].names),
                         "frames": gf.FEATSETS[n].frames,
                         "feat_spec_sha1": spec_sha1(gf.FEATSETS[n].spec),
