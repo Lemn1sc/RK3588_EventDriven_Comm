@@ -57,6 +57,28 @@ import detect_fall_video as dfv  # noqa: E402  复用 process_frame，保证与�
 DATA_DIR = ROOT / "data" / "datasets" / "URFD"
 CACHE_DIR = ROOT / "data" / "recordings" / "detect_fall"
 
+# 每个数据集一个缓存目录。切换数据集**必须**连缓存一起换：
+# 干净 RGB 与旧拼接图产出的帧表**维度、列名、规格指纹全都一样**，只是数值不同 ——
+# 放在同一目录下会静默命中旧缓存，跑出一份看起来完全正常、其实还是老数据的结果。
+# 这正是 common/cache.py 开头说的第 3 类失效（读到别人的缓存），用目录隔离来防。
+DATASET_CACHE = {
+    "URFD": CACHE_DIR,                                  # 旧：GitCode 镜像（实为 [深度|RGB] 拼接图）
+    "URFD_clean": ROOT / "data" / "recordings" / "detect_fall_clean",   # 新：Kaggle 原始 RGB
+}
+
+
+def set_dataset(data_dir: Path) -> None:
+    """切换数据集根目录与其缓存目录（必须在任何用到 DATA_DIR 的函数之前调用）。"""
+    global DATA_DIR, CACHE_DIR, FRAME_TABLE, FEAT_CACHE
+    DATA_DIR = Path(data_dir)
+    if not DATA_DIR.is_dir():
+        raise SystemExit(f"数据集目录不存在：{DATA_DIR}")
+    CACHE_DIR = DATASET_CACHE.get(DATA_DIR.name,
+                                  ROOT / "data" / "recordings" / f"detect_fall_{DATA_DIR.name}")
+    FRAME_TABLE = {m: CACHE_DIR / f"frames_{m}.v1.npz" for m in ("det", "pose")}
+    FEAT_CACHE = {n: CACHE_DIR / f"feats_{n}.npz" for n in FEATSETS}
+    print(f"[数据集] {rel(DATA_DIR)}   缓存 → {rel(CACHE_DIR)}")
+
 
 # ══════════════════════════ 原始帧表 ══════════════════════════
 
@@ -534,18 +556,26 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
+    # --data 挂在每个子命令上（子解析器各自独立）。切换数据集会同时切缓存目录，
+    # 理由见 set_dataset 上方那段注释。
+    data_help = "数据集根目录（默认 data/datasets/URFD）；换数据集会同时换缓存目录"
+
     p = sub.add_parser("frames", help="跑模型产原始帧表（贵；pose 10~20 分钟）")
     p.add_argument("--mode", choices=["det", "pose"], required=True)
     p.add_argument("--only", default=None, help="只跑匹配该 glob 的视频，如 'fall/fall-01*'")
     p.add_argument("--resume", action="store_true", help="已有段落跳过，断点续跑")
     p.add_argument("--dump-csv", type=Path, default=None, help="额外导出逐帧 CSV 便于核对")
+    p.add_argument("--data", type=Path, default=DATA_DIR, help=data_help)
 
     p = sub.add_parser("feats", help="帧表 → 特征缓存（秒级，不碰模型）")
     p.add_argument("--featsets", nargs="+", default=list(FEATSETS), choices=list(FEATSETS))
+    p.add_argument("--data", type=Path, default=DATA_DIR, help=data_help)
 
     sub.add_parser("list", help="列出已注册的特征集")
 
     args = ap.parse_args()
+    if args.cmd != "list" and getattr(args, "data", None) is not None:
+        set_dataset(args.data)
 
     if args.cmd == "list":
         print(f"{'特征集':10s} {'维度':>4s}  {'帧表':8s} 特征")

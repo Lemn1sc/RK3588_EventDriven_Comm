@@ -532,7 +532,12 @@ def main():
                          "（70 折，out-of-fold 池化后算一次 ROC，AUC 刻度细 15 倍）")
     ap.add_argument("--out-json", type=Path, default=RESULTS_DIR / "metrics_latest.json",
                     help="指标落盘路径（默认 experiments/results/metrics_latest.json）")
+    ap.add_argument("--data", type=Path, default=None,
+                    help="数据集根目录（默认 data/datasets/URFD）。切换会同时切特征缓存目录 —— "
+                         "旧数据是 [深度|RGB] 拼接图，见 docs/08 §12")
     args = ap.parse_args()
+    if args.data is not None:
+        gf.set_dataset(args.data)
     seeds = args.seeds
     lovo = args.protocol == "lovo"
 
