@@ -1,0 +1,74 @@
+{
+  "URFD cam0": {
+    "unit": "视频",
+    "n": 70,
+    "rules": {
+      "aspect": {
+        "auc": 0.9708333333333334,
+        "mode_threshold": 0.8,
+        "dir": "lt",
+        "at_boundary": false
+      },
+      "cy": {
+        "auc": 0.9033333333333334,
+        "mode_threshold": 0.775,
+        "dir": "gt",
+        "at_boundary": false
+      },
+      "size": {
+        "auc": 0.5845833333333332,
+        "mode_threshold": 0.24,
+        "dir": "gt",
+        "at_boundary": false
+      },
+      "conf": {
+        "auc": 0.5866666666666667,
+        "mode_threshold": 0.1,
+        "dir": "gt",
+        "at_boundary": true
+      },
+      "severity": {
+        "auc": 0.8958333333333333,
+        "mode_threshold": 0.28,
+        "dir": "gt",
+        "at_boundary": false
+      }
+    }
+  },
+  "MCF": {
+    "unit": "标注区间",
+    "n": 440,
+    "rules": {
+      "aspect": {
+        "auc": 0.7535453464673912,
+        "mode_threshold": 2.0,
+        "dir": "lt",
+        "at_boundary": false
+      },
+      "cy": {
+        "auc": 0.5756305197010869,
+        "mode_threshold": 0.325,
+        "dir": "gt",
+        "at_boundary": false
+      },
+      "size": {
+        "auc": 0.5586468240489131,
+        "mode_threshold": 0.22,
+        "dir": "gt",
+        "at_boundary": false
+      },
+      "conf": {
+        "auc": 0.5602708899456521,
+        "mode_threshold": 0.85,
+        "dir": "gt",
+        "at_boundary": false
+      },
+      "severity": {
+        "auc": 0.6927437160326086,
+        "mode_threshold": 0.02,
+        "dir": "gt",
+        "at_boundary": true
+      }
+    }
+  }
+}
