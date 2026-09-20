@@ -20,15 +20,20 @@
     # 用自己的视频（无标注，只看效果）
     python scripts/demo_fall_detect.py --video path/to/x.mp4
 
-注意：特征是用「累积帧表 + 重建」算的，与训练时**逐位一致**。
-板端部署应改成流式增量（O(1) 内存），但那需要另外验证一致性 —— 见 --verify。
+注意：特征是用「累积帧表 + 重建」算的，与训练时**逐位一致** —— 走的是
+`FEATSETS['det.v2'].build()` 这条同源代码路径，不手工拼特征。
+
+代价是每帧对整张表重算一遍（O(T²)）。演示视频只有几百帧，可以忽略；
+但**板端要改成流式增量**：`cy_drop` / `size_log_ratio` 的因果基线本质是
+「最近 30 个有目标帧的中位数」，只需维护一个长度 30 的队列，是 O(1) 内存。
+（改完必须拿本脚本对同一段视频跑一遍、逐位比对特征，确认两边一致 ——
+手工拼特征最容易在这里出错，先前测决策延迟时就吃过一次亏。）
 """
 from __future__ import annotations
 
 import argparse
 import csv
 import sys
-from collections import defaultdict, deque
 from pathlib import Path
 
 import cv2
