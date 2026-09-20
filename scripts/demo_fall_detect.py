@@ -33,12 +33,18 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import sys
 from pathlib import Path
 
 import cv2
 import numpy as np
 import torch
+
+# Windows 控制台默认 GBK，中文会乱码（stdout 和 stderr 都要设，报错信息同样得能读）
+for _s in (sys.stdout, sys.stderr):
+    if isinstance(_s, io.TextIOWrapper):
+        _s.reconfigure(encoding="utf-8")
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
@@ -260,7 +266,7 @@ def compose(frame, cw, ch, W, PANEL, t, fps, row, feat, prob, probs, thr,
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--video", type=Path, default=None)
+    ap.add_argument("--video", type=Path, default=None, help="输入视频；不给就用 --batch")
     ap.add_argument("--label-seq", default=None, help="官方标注的序列名，如 fall-03（用于画真值、算延迟）")
     ap.add_argument("--thr", type=float, default=0.9, help="报警阈值（默认 0.90）")
     ap.add_argument("--out", type=Path, default=None, help="输出视频路径")
@@ -285,7 +291,20 @@ def main() -> None:
                 jobs.append((v, seq, None))
     else:
         if args.video is None:
-            raise SystemExit("需要 --video 或 --batch N")
+            # 报错要能照着做：直接给两条可复制的命令，而不是只说「参数不够」。
+            raise SystemExit(
+                "没有指定输入。两种用法挑一个：\n"
+                "\n"
+                "  # 1) 快速跑一批，只看摘要（不写视频，几十秒）\n"
+                "  <解释器> scripts/demo_fall_detect.py --batch 5 --no-video\n"
+                "\n"
+                "  # 2) 单段出带画面的完整视频\n"
+                "  <解释器> scripts/demo_fall_detect.py \\\n"
+                "      --video data/datasets/URFD_clean/fall/fall-03-cam0.mp4 --label-seq fall-03\n"
+                "\n"
+                "把 <解释器> 换成实际用的那个，见 docs/04「运行环境」一节；\n"
+                "或者用包装脚本：scripts/rk.sh / scripts\\rk.bat（写法三种 shell 各不相同）。"
+            )
         jobs.append((args.video, args.label_seq, args.out))
 
     results = []

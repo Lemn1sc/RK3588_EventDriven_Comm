@@ -14,9 +14,11 @@ from pathlib import Path
 
 import numpy as np
 
-# Windows 控制台默认 GBK，打不出 ✓（沿用 check_event_vector.py 的做法）
-if isinstance(sys.stdout, io.TextIOWrapper):
-    sys.stdout.reconfigure(encoding="utf-8")
+# Windows 控制台默认 GBK：中文与 ✓ 会乱码。stdout / stderr **都要设** ——
+# 报错信息走的是 stderr，只设 stdout 的话出错时提示反而是乱码的，最难读的时候读不了。
+for _s in (sys.stdout, sys.stderr):
+    if isinstance(_s, io.TextIOWrapper):
+        _s.reconfigure(encoding="utf-8")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
