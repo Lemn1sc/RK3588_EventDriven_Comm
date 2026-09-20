@@ -273,13 +273,19 @@ def main() -> None:
     ap.add_argument("--outdir", type=Path, default=OUT_DIR)
     ap.add_argument("--no-video", action="store_true", help="只跑不写视频（快）")
     ap.add_argument("--batch", type=int, default=0, help="批量跑前 N 段跌倒视频，只出摘要")
+    ap.add_argument("--data", type=Path, default=ROOT / "data" / "datasets" / "URFD_clean",
+                    help="数据集根目录（决定用哪个权重：权重文件名带数据集身份）")
     args = ap.parse_args()
+
+    # 权重路径依赖 DATA_DIR，所以必须先切数据集再 load_checkpoint。
+    # 默认用干净数据 —— demo 的默认输入也在 URFD_clean 下。
+    gf.set_dataset(args.data)
 
     global det_model, pose_model
     from ultralytics import YOLO
     det_model = YOLO(str(dfv.PT_DIR / "yolov8n.pt"))
     pose_model = YOLO(str(dfv.PT_DIR / "yolov8n-pose.pt"))
-    model = tg.load_checkpoint(dfv.PT_DIR / "gru_fall_det.v2.pt", "det.v2").eval()
+    model = tg.load_checkpoint(tg.model_path("det.v2"), "det.v2").eval()
     model.to("cpu")
 
     jobs = []

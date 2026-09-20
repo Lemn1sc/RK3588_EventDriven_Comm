@@ -62,8 +62,14 @@ rel = gf.rel  # 显示路径用，报错信息里不因为路径转换再抛异�
 
 
 def model_path(featset: str) -> Path:
-    """权重路径带特征集身份：换特征集就换文件，不会把旧权重冲掉。"""
-    return ROOT / "models" / "pt" / f"gru_fall_{featset}.pt"
+    """权重路径带**数据集 + 特征集**双重身份。
+
+    只带特征集是不够的。URFD 与 URFD_clean 产出的特征**维度、列名、规格指纹
+    完全相同**，只有数值分布不同 —— 同一个文件名下，换数据集重训会**静默冲掉**
+    旧权重，而拿甲数据集训的权重去乙数据集上跑也**照样通过校验**。
+    （两次都实测踩过：一次是冒烟测试冲掉了正式权重，一次是 checksum 拦不住。）
+    """
+    return ROOT / "models" / "pt" / f"gru_fall_{gf.DATA_DIR.name}_{featset}.pt"
 
 # ── GRU 超参（简单，够演示）──
 WINDOW = 30          # 每窗口帧数（≈1s）
@@ -222,6 +228,7 @@ def save_checkpoint(path, model, featset: str) -> None:
                 "featset": featset,
                 "feat_spec_sha1": spec_sha1(fs.spec),
                 "in_dim": fs.dim,
+                "dataset": gf.DATA_DIR.name,     # 数据集身份（见 model_path 的说明）
                 "hidden": HIDDEN, "layers": LAYERS,
                 "window": WINDOW, "stride": STRIDE}, path)
 
@@ -231,12 +238,26 @@ def load_checkpoint(path, featset: str):
     fs = gf.FEATSETS[featset]
     ckpt = torch.load(path, map_location="cpu")
     want = spec_sha1(fs.spec)
+    want_ds = gf.DATA_DIR.name
     if ckpt.get("feat_spec_sha1") != want or ckpt.get("in_dim") != fs.dim:
         raise SystemExit(
             f"权重与当前特征集不匹配：{rel(path)}\n"
             f"  权重：特征集 {ckpt.get('featset')} / 指纹 {ckpt.get('feat_spec_sha1')} / "
             f"{ckpt.get('in_dim')} 维\n"
             f"  当前：特征集 {featset} / 指纹 {want} / {fs.dim} 维"
+        )
+    # 数据集也要验：两个数据集的特征指纹**完全相同**，只验指纹拦不住跨集误用。
+    # 说明：旧权重没有 dataset 字段（None），这里放行但提示一次，避免历史权重全废。
+    got_ds = ckpt.get("dataset")
+    if got_ds is None:
+        print(f"  [提示] 该权重未记录数据集（旧格式），无法校验来源：{rel(path)}")
+    elif got_ds != want_ds:
+        raise SystemExit(
+            f"权重来自别的数据集：{rel(path)}\n"
+            f"  权重：{got_ds}\n"
+            f"  当前：{want_ds}（{gf.DATA_DIR}）\n"
+            f"  → 两个数据集的特征维度与指纹相同、只有数值分布不同，**不会报形状错**，\n"
+            f"    跑出来的结果看着正常但没有意义。请用当前数据集重新训练。"
         )
     model = FallGRU(ckpt["in_dim"], ckpt.get("hidden", HIDDEN), ckpt.get("layers", LAYERS))
     model.load_state_dict(ckpt["state_dict"])
