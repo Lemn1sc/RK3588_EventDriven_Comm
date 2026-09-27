@@ -18,4 +18,14 @@ opencv-python==4.10.0.84
 numpy==1.26.4
 matplotlib==3.9.2
 
+# ── ONNX（为板端 RKNN 转换做准备）──────────────────────────────
+# ⚠ numpy 必须钉在 1.26.x：torch 2.3.1 与 numpy 2.x 不兼容，装了 numpy 2 会报
+#   `_ARRAY_API not found` → 运行时 "Numpy is not available"，ultralytics 直接崩。
+#   而 pip 装 onnx 时会**顺手把 numpy 升到 2.x**（已实测踩过）。所以：
+#       pip install onnx onnxruntime "numpy==1.26.4"
+#   **三个一起装**，让 pip 在同一次解析里看到约束，numpy 就不会被升级。
+#   （onnx 依赖的 ml-dtypes 会报 "requires numpy>=2.0.0" 的警告，实测无害，可忽略。）
+onnx==1.23.0
+onnxruntime==1.23.2
+
 # rknn-toolkit2 仅 Linux（WSL2），T0.9 才用，这里不列，避免 Windows 安装失败。
