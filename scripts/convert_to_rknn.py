@@ -98,8 +98,18 @@ def build_rknn(onnx: Path, imgs: list[Path], out: Path, target: str,
     return rknn
 
 
-def preprocess(path: Path, size: int = 640) -> np.ndarray:
-    """与推理时一致：letterbox → RGB → /255 → NCHW。"""
+def preprocess(path: Path, size: int = 640) -> tuple[np.ndarray, np.ndarray]:
+    """letterbox → RGB。
+
+    返回 **(RKNN 输入, onnxruntime 输入)** 两个张量 —— 它们**必须不同**：
+
+      - RKNN 侧：喂 **0~255 的 RGB**。config 里已经设了 mean=0/std=255，
+        归一化由 RKNN 自己做。若这里先除过 255，就会被除两次，输入变成
+        0~0.004 的灰图 —— 验证结果会一片漆黑，但**不会报错**。
+      - onnxruntime 侧：喂 **0~1 的 RGB**（ONNX 模型本身不含归一化）。
+
+    两边必须是同一个 [0,1] 语义，误差才反映**量化**而不是预处理差异。
+    """
     import cv2
     img = cv2.imread(str(path))
     if img is None:
@@ -110,12 +120,96 @@ def preprocess(path: Path, size: int = 640) -> np.ndarray:
     canvas = np.full((size, size, 3), 114, np.uint8)
     top, left = (size - nh) // 2, (size - nw) // 2
     canvas[top:top + nh, left:left + nw] = cv2.resize(img, (nw, nh))
-    rgb = canvas[:, :, ::-1].astype(np.float32) / 255.0
-    return rgb.transpose(2, 0, 1)[None]
+
+    rgb255 = canvas[:, :, ::-1].astype(np.float32)          # RGB, 0~255
+    rknn_in = rgb255[None]                                  # NHWC (1,640,640,3)
+    ort_in = (rgb255 / 255.0).transpose(2, 0, 1)[None]      # NCHW, 0~1
+    return rknn_in, ort_in
+
+
+STRIDES = (8, 16, 32)
+
+
+def decode(outs, conf_thres=0.25):
+    """9 输出（3 尺度 × box分布/类别分/概率和）→ xyxy 框、置信度、类别。
+
+    box 输出是 (1,64,H,W) 的 DFL logits：reshape 成 (4,16,H,W) 后对 16 个 bin
+    做 softmax、再与 0..15 加权求和，得到「到 4 条边的距离」（网格单位）。
+    ⚠ 若某版本的输出是 NHWC 排布（少见），这里会解不出框 —— 下面的形状检查
+      会先把这类问题暴露出来，而不是给一个假的误差。
+    """
+    outs = [np.asarray(o) for o in outs]
+    # 按形状把 9 个输出归到 3 个尺度：box=(·,64,H,W), score=(·,80,H,W), sum=(·,1,H,W)
+    by_hw: dict[tuple[int, int], dict[str, np.ndarray]] = {}
+    for o in outs:
+        a = o[0] if o.ndim == 4 else o
+        if a.ndim != 3:
+            continue
+        c, h, w = a.shape
+        slot = by_hw.setdefault((h, w), {})
+        if c == 64:
+            slot["box"] = a
+        elif c == 80:
+            slot["score"] = a
+        elif c == 1:
+            slot["sum"] = a
+
+    boxes, confs, clss = [], [], []
+    for (h, w), slot in sorted(by_hw.items(), key=lambda kv: -kv[0][0]):
+        if "box" not in slot or "score" not in slot:
+            continue
+        stride = 640 // h
+        box = slot["box"].reshape(4, 16, h, w)
+        b = np.exp(box - box.max(1, keepdims=True))
+        b /= b.sum(1, keepdims=True)
+        d = (b * np.arange(16).reshape(1, 16, 1, 1)).sum(1)      # (4,h,w)
+        gy, gx = np.meshgrid(np.arange(h), np.arange(w), indexing="ij")
+        score = slot["score"]
+        c = score.max(0)
+        m = c > conf_thres
+        if not m.any():
+            continue
+        boxes.append(np.stack([(gx + .5 - d[0])[m] * stride, (gy + .5 - d[1])[m] * stride,
+                               (gx + .5 + d[2])[m] * stride, (gy + .5 + d[3])[m] * stride], 1))
+        confs.append(c[m])
+        clss.append(score.argmax(0)[m])
+    if not boxes:
+        return np.zeros((0, 4)), np.zeros(0), np.zeros(0, dtype=int)
+    B = np.concatenate(boxes); C = np.concatenate(confs); K = np.concatenate(clss)
+    keep = []
+    import cv2
+    for i in cv2.dnn.NMSBoxes(B.tolist(), C.tolist(), conf_thres, 0.7):
+        keep.append(int(i))
+    return B[keep], C[keep], K[keep]
+
+
+def match_boxes(b_ref, c_ref, b_hyp, c_hyp, iou_thr=0.5):
+    """按 IoU 贪心匹配两批框，返回 (匹配数, 平均 IoU, 最大置信度差)。"""
+    def iou(a, b):
+        x1, y1 = max(a[0], b[0]), max(a[1], b[1])
+        x2, y2 = min(a[2], b[2]), min(a[3], b[3])
+        inter = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+        ua = (a[2]-a[0])*(a[3]-a[1]) + (b[2]-b[0])*(b[3]-b[1]) - inter
+        return inter / ua if ua > 0 else 0.0
+
+    used, ious, dconf = set(), [], 0.0
+    for i in range(len(b_ref)):
+        best, bj = 0.0, -1
+        for j in range(len(b_hyp)):
+            if j in used:
+                continue
+            v = iou(b_ref[i], b_hyp[j])
+            if v > best:
+                best, bj = v, j
+        if bj >= 0 and best >= iou_thr:
+            used.add(bj)
+            ious.append(best)
+            dconf = max(dconf, abs(float(c_ref[i]) - float(c_hyp[bj])))
+    return len(ious), (float(np.mean(ious)) if ious else 0.0), dconf
 
 
 def verify(rknn, onnx: Path, imgs: list[Path], n: int = 8):
-    """simulator 跑 vs onnxruntime 跑，逐输出对比。"""
+    """simulator vs onnxruntime —— 比**解码后的框**，而不是原始张量。"""
     try:
         import onnxruntime as ort
     except ImportError:
@@ -129,25 +223,38 @@ def verify(rknn, onnx: Path, imgs: list[Path], n: int = 8):
     name = sess.get_inputs()[0].name
     sample = list(np.linspace(0, len(imgs) - 1, min(n, len(imgs))).round().astype(int))
 
-    print(f"\n=== 验证：simulator vs onnxruntime（{len(sample)} 张）===")
-    worst = 0.0
-    worst_i = -1
-    for k in sample:
-        x = preprocess(imgs[k])
-        a = rknn.inference(inputs=[x])            # list of ndarray
-        b = sess.run(None, {name: x})
-        d = max(float(np.abs(np.asarray(ai).ravel() - np.asarray(bi).ravel()).max())
-                for ai, bi in zip(a, b))
-        if d > worst:
-            worst, worst_i = d, k
-        print(f"  {imgs[k].name:<40} 最大绝对误差 {d:.5f}")
+    print(f"\n=== 先看两边输出的 dtype / 形状（确认没有重排或类型不一致）===")
+    rknn_in, ort_in = preprocess(imgs[sample[0]])
+    a0 = rknn.inference(inputs=[rknn_in])
+    b0 = sess.run(None, {name: ort_in})
+    print(f"  RKNN : {len(a0)} 个输出")
+    for o in a0:
+        print(f"    {str(np.asarray(o).shape):<20} {np.asarray(o).dtype}")
+    print(f"  ONNX : {len(b0)} 个输出")
+    for o in b0:
+        print(f"    {str(np.asarray(o).shape):<20} {np.asarray(o).dtype}")
+    print()
 
-    print(f"\n  最大绝对误差 {worst:.5f}（{imgs[worst_i].name}）")
-    print("  判读：box 分布是 logits（范围可达 ±15），类别分是概率（0~1）。")
-    print("        参考 rknn_model_zoo 的 yolov8 经验，类别分误差 < 0.05、")
-    print("        且**解码后的框与 fp32 基本重合**，即可认为量化可用。")
-    print("        ⚠ 若误差集中在 L1（躺地）那批图上，说明校准集没覆盖好，")
-    print("          调大 make_rknn_calib.py 的 --n 或提高躺地占比后重转。")
+    print(f"=== 验证：解码后的检测框（{len(sample)} 张，IoU≥0.5 算匹配）===")
+    print(f"{'图':<40}{'fp32框':>7}{'rknn框':>7}{'匹配':>6}{'平均IoU':>9}{'最大Δconf':>10}")
+    worst = (1.0, -1)
+    for k in sample:
+        rknn_in, ort_in = preprocess(imgs[k])
+        a = rknn.inference(inputs=[rknn_in])
+        b = sess.run(None, {name: ort_in})
+        br, cr, _ = decode(a)
+        bo, co, _ = decode(b)
+        nm, miou, dcf = match_boxes(bo, co, br, cr)
+        print(f"  {imgs[k].name:<38}{len(bo):>7}{len(br):>7}{nm:>6}{miou:>9.3f}{dcf:>10.3f}")
+        if miou < worst[0] or (miou == worst[0] and nm < len(bo)):
+            worst = (miou, k)
+
+    print()
+    print("  判读标准：")
+    print("    · 匹配数应 ≥ fp32 框数（允许 rknn 多报几个低分框）")
+    print("    · 平均 IoU > 0.9 → 框基本重合，量化可用")
+    print("    · 最大 Δconf < 0.1 → 置信度没被量化吃掉")
+    print("    · 若 L1（躺地）那几张明显更差，回去加大 make_rknn_calib.py 的 --n")
 
 
 def main() -> None:
@@ -159,6 +266,9 @@ def main() -> None:
     ap.add_argument("--target", default="rk3588", help="板端平台，如 rk3588 / rk3588s")
     ap.add_argument("--calib-limit", type=int, default=None, help="最多用多少张校准图")
     ap.add_argument("--skip-verify", action="store_true")
+    ap.add_argument("--reuse", action="store_true",
+                    help="跳过 build，直接加载已存在的 .rknn。"
+                         "⚠ 只能连真机跑（simulator 不支持 load_rknn 出来的模型）")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
@@ -175,8 +285,20 @@ def main() -> None:
     print(f"目标   : {args.target}")
     print()
 
-    txt = make_dataset_txt(imgs, ROOT / "models" / "rknn" / "calib.txt")
-    rknn = build_rknn(args.onnx, imgs, args.out, args.target, txt, args.verbose)
+    if args.reuse:
+        # RKNN 限制：load_rknn() 出来的模型**不能在 simulator 上推理**，
+        # 必须 init_runtime(target=<真机>) 才行。所以 --reuse 只对真机有意义。
+        # 官方原话："RKNN model that loaded by 'load_rknn' not support inference
+        # on the simulator, please set 'target' first!"
+        raise SystemExit(
+            "--reuse 只能配合真机使用（simulator 不支持 load_rknn 出来的模型）。\n"
+            "  现在要做 PC 上的数值验证，请**去掉 --reuse**，走 load_onnx + build：\n"
+            "      python3 scripts/convert_to_rknn.py\n"
+            "  （重建约 40 秒，但只有这样才拿得到 simulator 的推理结果。）"
+        )
+    else:
+        txt = make_dataset_txt(imgs, ROOT / "models" / "rknn" / "calib.txt")
+        rknn = build_rknn(args.onnx, imgs, args.out, args.target, txt, args.verbose)
 
     if not args.skip_verify:
         verify(rknn, args.onnx, imgs)
