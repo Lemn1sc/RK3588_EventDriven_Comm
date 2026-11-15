@@ -16,6 +16,13 @@ experiments/results/*
 !experiments/results/*.csv
 !experiments/results/*.md
 
+# VM 共享目录：Windows ↔ Ubuntu 之间传文件用。
+# 内容体积大且是本地产物，不入库；只保留说明和目录占位。
+vm_share/to_vm/*
+vm_share/from_vm/*
+!vm_share/README.md
+!vm_share/**/.gitkeep
+
 # Python
 __pycache__/
 *.py[cod]
