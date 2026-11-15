@@ -2,6 +2,10 @@
 models/pt/*
 models/onnx/*
 models/rknn/*
+# 例外：RKNN 转换产物随代码发布 —— 板上部署直接用它，别人 clone 后也能
+# 立刻验证/部署，不必先装 rknn-toolkit2 重转一遍。5.4 MB，可接受。
+# 它可由 models/onnx/yolov8n.onnx + calib/ + convert_to_rknn.py 完整重建。
+!models/rknn/yolov8n.rknn
 !models/**/.gitkeep
 data/datasets/*
 data/recordings/*
