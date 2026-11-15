@@ -81,39 +81,18 @@
 
 ---
 
-## 待完成
+## 待完成（**任务细节见 `docs/03_开发路线图.md`，此处只记状态**）
 
-### T0.4 localhost 全链路模拟
+| 任务 | 状态 | 说明 |
+|---|---|---|
+| T0.4 localhost 全链路 | ⬜ | `src/edge_node/`、`remote_node/`、`transport/` 均为空 |
+| T0.5 仿真器 | ⬜ | `src/simulator/` 为空 —— **五个核心指标全靠它，目前一个未测** |
+| T0.6 GRU 控制端 | 🔶 | 训练与 LOVO 已在 `scripts/` 完成；未搬进 `src/controller/` |
+| T0.7 真实数据集 | ✅ | URFD + MCF 已接入，官方逐帧标注已拿到 |
+| T0.8 对比实验框架 | ⬜ | `experiments/baselines/` 为空 |
+| T0.9 RKNN 转换 | 🔶 | 转换 + simulator 验证已完成；**板端实测待做** |
 
-- [ ] `src/edge_node/` — 边缘端节点（读视频 → 检测 → 决策 → 发帧）
-- [ ] `src/remote_node/` — 远端节点（收帧 → pose 姿态估计 → 跌倒判定）
-- [ ] `src/transport/` — UDP 收发 + 优先级队列 + 轻量重传
-- [ ] 双进程 pipeline 跑通
-
-### T0.5 仿真器
-
-- [ ] `src/simulator/` — 事件 + 信道仿真，生成 GRU 训练数据
-
-### T0.6 GRU 控制端训练
-
-- [ ] `src/controller/` — GRUOffloadController 定义 + 仿真数据监督训练
-
-### T0.7 接入真实数据集（数据与首测已完成，见"已完成"）
-
-- [x] `data/datasets/URFD/` — UR Fall Detection 一号摄像头视频已就位并跑通首测
-- [ ] （可选）Le2i Fall Detection（含 Office 场景，作财务室代理；数据源见 docs/05、docs/08）
-
-### T0.8 对比实验框架
-
-- [ ] `experiments/` — 4 基线 + 指标统计 + 出图
-
-### T0.9（可选）RKNN 转换验证 ✅ 已完成（2026-10-23）
-
-- [x] VMware Ubuntu 20.04 + rknn-toolkit2 1.5.2（板端 librknnrt 1.5.2）
-- [x] ONNX 12.1MB → `.rknn` **5.4MB**，int8 量化（200 张分层校准图）
-- [x] simulator 验证：解码后框 **IoU 0.973~0.992**，躺地样本反而最稳
-- [x] 产物入库：`models/rknn/yolov8n.rknn`
-- [ ] 板端实测延迟与数值（需板子）
+> 「已完成」的 T0.x 只有 **T0.9** 是在 8 月之后完成的，其余见上面「2026-09~11 进展」。
 
 ---
 
