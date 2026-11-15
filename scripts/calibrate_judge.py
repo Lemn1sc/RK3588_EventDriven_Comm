@@ -137,7 +137,7 @@ def main() -> None:
         ("② 躯干倾角 > 45°", "torso", dfv.TORSO_TILT_MAX_DEG, "gt"),
         ("③ 髋踝高差 < 0.3", "hip", dfv.HIP_ANKLE_MIN_RATIO, "lt"),
     ):
-        pos, neg, sc = [], [], []
+        pos, sc = [], []
         for v in vids:
             m = np.isfinite(v["label"])
             if not m.any():

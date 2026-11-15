@@ -118,7 +118,7 @@ def check_curve_shape():
     assert len(fpr) <= 5, f"并列块没被合并：折线有 {len(fpr)} 个点"
 
     # 无并列时工作点数应等于样本数 + 1
-    f2, t2 = roc_curve([1, 1, 0, 0], [0.9, 0.8, 0.2, 0.1])
+    f2, _ = roc_curve([1, 1, 0, 0], [0.9, 0.8, 0.2, 0.1])
     assert len(f2) == 5, len(f2)
     print("  [5] 阶梯单调、首末点正确、并列块已合并 ✓")
 

@@ -196,7 +196,7 @@ def build_frame_table(mode: str, only: str | None, resume: bool, dump_csv: Path 
     print(f"产出帧表 [{mode}]：{len(videos)} 段 × 每帧"
           f"{'检测+姿态' if always_pose else '仅检测'} → {rel(path)}")
     t0 = time.time()
-    for i, (key, label) in enumerate(videos, 1):
+    for i, (key, _) in enumerate(videos, 1):
         import cv2
 
         cap = cv2.VideoCapture(str(DATA_DIR / key))

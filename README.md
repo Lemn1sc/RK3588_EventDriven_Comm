@@ -19,34 +19,43 @@
 
 ## 目录结构
 
+> 图例：✅ 已实现　⬜ 待实现（骨架目录，只有 `.gitkeep`）
+
 ```
 RK3588_EventDriven_Comm/
-├── README.md                  # 本文件：项目总览
-├── docs/                      # 全部规划与参考文档（提问时先看这里）
-│   ├── 00_讨论记录摘要.md      # 与 AI 的历史讨论浓缩
+├── README.md / PROGRESS.md
+├── docs/                       # 全部规划与实验记录（提问先看这里）
+│   ├── 00_讨论记录摘要.md
 │   ├── 01_项目规划.md          # 目标、范围、里程碑
-│   ├── 02_技术方案.md          # 三端架构 + 组合1/2/3 细节
-│   ├── 03_开发路线图.md        # 分阶段任务与时间估算
-│   ├── 04_无板子阶段任务.md    # 无板子阶段：PC 上先做完的任务
-│   ├── 05_资源汇总.md          # 模型/数据集/代码仓库链接
-│   ├── 06_问题记录.md          # 已知问题与设计决策记录
-│   ├── 07_模型输出结构_T0.2.md # 检测/姿态模型输出字段 + COCO 关键点顺序
-│   └── 08_真实数据集首测_T0.7.md # ★ URFD 首测记录：两个关键发现 + bug 复盘
+│   ├── 02_技术方案.md          # 三端架构 + 组合1/2/3
+│   ├── 03_开发路线图.md
+│   ├── 04_无板子阶段任务.md    # ★ 任务清单 + T0.9 RKNN 转换结果
+│   ├── 05_资源汇总.md
+│   ├── 06_问题记录.md          # ★ 已知问题与踩坑
+│   ├── 07_模型输出结构_T0.2.md
+│   ├── 08_真实数据集首测_T0.7.md  # ★ 完整实验记录（§3~§14）
+│   └── 汇报_event端工作进展.md
 ├── src/
-│   ├── common/                # 事件向量定义、协议、工具函数
-│   ├── edge_node/             # 事件端：检测 + 卸载决策（模拟 RK3588）
-│   ├── remote_node/           # 远端：姿态估计服务（模拟 PC）
-│   ├── controller/            # GRU 控制端：模型定义 + 训练
-│   ├── transport/             # WiFi/socket 通信（UDP over localhost）
-│   └── simulator/             # 事件流 + 信道仿真器（生成训练数据）
-├── experiments/               # 对比实验
-│   ├── baselines/             # 周期传输/降采样/固定阈值基线
-│   └── results/               # 实验数据与图表输出
-├── scripts/                   # ONNX 导出、rknn 转换等一次性脚本；detect_fall_video.py / bench_pose_fall.py 为 T0.7 实测脚本
-├── models/{pt,onnx,rknn}/     # 模型文件（预训练/转换产物）
-├── data/{datasets,recordings}/# 公开数据集与自录视频
-├── notebooks/                 # 探索性分析
-└── configs/                   # 超参数 / 实验配置
+│   ├── common/                 # ✅ 事件向量契约、缓存版本机制、评测指标
+│   ├── edge_node/              # ⬜ 事件端：检测 + 卸载决策（模拟 RK3588）
+│   ├── remote_node/            # ⬜ 远端：姿态估计服务
+│   ├── controller/             # ⬜ GRU 控制端（当前逻辑在 scripts/train_gru_fall.py）
+│   ├── transport/              # ⬜ WiFi / UDP 传输
+│   └── simulator/              # ⬜ 事件流 + 信道仿真器 —— **核心指标依赖它，目前为空**
+├── experiments/
+│   ├── baselines/              # ⬜ 周期/降采样/固定阈值/GRU 四条基线
+│   └── results/                # ✅ 14 个 json，文档里的数字都能从这里复算
+├── scripts/                    # ✅ 30 个脚本，分四类：
+│   │                           #   数据准备  build_urfd_clean / prepare_urfd_views / make_rknn_calib
+│   │                           #   特征训练  gru_features / train_gru_fall
+│   │                           #   评测分析  analyze_lovo / calibrate_judge / best_single_frame_rule / mcf_*
+│   │                           #   演示转换  demo_fall_detect / convert_to_rknn / detect_fall_video
+│   └── check_*.py              #   自检（5 个，纯 numpy 可裸跑）
+├── models/{pt,onnx,rknn}/      # 模型；`rknn/yolov8n.rknn` 已入库（5.4MB），其余 gitignore
+├── vm_share/{to_vm,from_vm}/   # Windows ↔ Ubuntu 虚拟机传文件（内容 gitignore）
+├── data/{datasets,recordings}/ # 数据集与缓存，约 16 GB，全部 gitignore
+├── notebooks/                  # ⬜ 空
+└── configs/                    # ⬜ 空（超参仍硬编码在脚本顶部）
 ```
 
 ## 快速开始（无板子阶段）
@@ -59,6 +68,21 @@ RK3588_EventDriven_Comm/
 
 ## 环境
 
-- 开发机：Windows + WSL2 (Ubuntu 22.04)
-- Python：PyTorch + ultralytics（算法）；rknn-toolkit2（板端转换，仅 Linux）
-- 目标板：RK3588（NPU 6TOPS），到手后再介入
+| 用途 | 环境 | 说明 |
+|---|---|---|
+| **算法（Windows）** | conda `rk` 环境，Python 3.10.20<br>torch 2.3.1+cu121 · ultralytics 8.2.103 · opencv 4.10 | `conda` 不在 Git Bash 的 PATH 上，用 `scripts/rk.sh` 调 |
+| **模型转换（Linux）** | **VMware Ubuntu 20.04**，Python 3.8<br>rknn-toolkit2 **1.5.2**（对应板端 librknnrt 1.5.2） | 工具链只有 Linux 版；输出 `models/rknn/yolov8n.rknn` |
+| **目标板** | RK3588（NPU 6 TOPS） | 待接入；部署用它跑 `rknn_toolkit_lite2`（aarch64） |
+
+> 两台机器之间用 [`vm_share/`](vm_share/README.md) 传文件（VMware 共享文件夹双向同步）。
+
+### 常用命令
+
+```bash
+scripts/rk.sh scripts/demo_fall_detect.py --batch 5 --no-video   # 快速看效果
+scripts/rk.sh scripts/gru_features.py list                       # 看有哪些特征集
+scripts/rk.sh scripts/train_gru_fall.py --protocol lovo          # LOVO 验证
+```
+
+> 详细的环境排障（PowerShell 的 `&`、`.bat` 编码、numpy 版本冲突）见
+> [docs/04 T0.1「运行环境」](docs/04_无板子阶段任务.md)。
