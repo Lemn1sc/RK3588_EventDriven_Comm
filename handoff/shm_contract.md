@@ -111,7 +111,7 @@ cameraApp ──写──> /camera_shm ──读──> 模型进程 ──写�
 | 24 | `publish_ts_ns` | 模型发布这条记录的时刻 |
 | 32 | `infer_ms` | 这一帧从取图到发布的耗时 |
 
-`publish_ts_ns - capture_ts_ns` 是板上处理时延。远端回来时带回 `recv_ts`，
+`publish_ts_ns - capture_ts_ns` 是板上处理时延。远端的 ACK 里带回 `recv_ts`，
 再减 `capture_ts_ns` 就是端到端时延。**没有 `capture_ts_ns`，80 ms 到底花在哪就说不清了。**
 
 `seq` 和 `frame_id` 同时存在不是冗余：`seq` 是模型自己的发布节奏（15 Hz，连续），

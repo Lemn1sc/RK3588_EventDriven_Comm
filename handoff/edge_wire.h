@@ -57,7 +57,7 @@ enum {
     EDGE_MSG_IMAGE      = 2,   /* ROI / FULL 帧，分片 */
     EDGE_MSG_CLIP_START = 3,   /* 片段清单（可选，v2） */
     EDGE_MSG_CLIP_FRAG  = 4,   /* 片段的一帧，分片（可选，v2） */
-    EDGE_MSG_RESULT     = 5,   /* 远端 → 板端：确认结果 */
+    EDGE_MSG_ACK        = 5,   /* 远端 → 板端：接收确认 */
     EDGE_MSG_PING       = 6,   /* 板端 → 远端：RTT 探测 */
     EDGE_MSG_PONG       = 7    /* 远端 → 板端：原样回传 probe_ts */
 };
@@ -68,7 +68,7 @@ enum {
 #define EDGE_PRIO_BACKGROUND 0u   /* 片段：拥塞时第一个丢 */
 #define EDGE_PRIO_NORMAL     1u   /* 完整帧 / 图像分片 */
 #define EDGE_PRIO_HIGH       2u   /* ROI 确认帧 */
-#define EDGE_PRIO_CRITICAL   3u   /* 告警 / 结果 */
+#define EDGE_PRIO_CRITICAL   3u   /* 告警 / 接收确认 */
 
 #define EDGE_FLAG_RETRANSMIT (1u << 8)   /* 保留：若以后做重传 */
 
@@ -167,24 +167,28 @@ typedef struct EDGE_WIRE_PACKED {
     uint16_t jpeg_len;         /* 该帧 JPEG 总字节数（≤ 65535） */
 } edge_clip_frag_hdr;         /* 20 B */
 
-/* ── EDGE_MSG_RESULT：远端确认结果 ──────────────────────────
+/* ── EDGE_MSG_ACK：远端接收确认 ──────────────────────────────
  *
- * 远端回传 verdict + 少量姿态导出量（不必传 17×3 原始关键点）。
- * echo_ts_ns 原样回传 ALERT/IMAGE 里的 ts_ns，板端据此算 RTT，
- * **不需要两端时钟同步**。
+ * 远端当前**不跑模型**（姿态模型暂缓），只做接收、显示、存档。
+ * 这条回传不是"判决"，而是让板端知道：收到了没有、花了多久。
+ *   - echo_ts_ns 原样回传 ALERT/IMAGE 里的 ts_ns，板端据此算 RTT，
+ *     **不需要两端时钟同步**；
+ *   - recv_ts_ns 是远端自己的收到时刻，只用于远端侧日志；
+ *   - proc_ms 让控制端把"远端处理"算进延迟预算。
+ *
+ * 以后如果要接人工确认或远端模型，往 flags / reserved 里加，
+ * 不要改已有字段的位置。
  */
 typedef struct EDGE_WIRE_PACKED {
     uint32_t event_id;
     uint64_t frame_id;
     uint64_t echo_ts_ns;       /* 回传请求方的 ts_ns */
-    float    confidence;
-    float    torso_angle_deg;  /* 躯干与竖直方向夹角 */
-    float    head_hip_dy;      /* 头—髋高度差（归一化，图像 y 向下） */
-    float    body_aspect;      /* 姿态外接框 高/宽 */
+    uint64_t recv_ts_ns;       /* 远端收到时刻（远端本地时钟） */
     uint32_t proc_ms;          /* 远端处理耗时 */
-    uint8_t  verdict;          /* 0=NO_FALL, 1=FALL, 2=UNCERTAIN, 3=FAIL */
-    uint8_t  pad[3];
-} edge_result;                 /* 44 B */
+    uint8_t  status;           /* 0=RECEIVED, 1=REJECTED, 2=PARTIAL */
+    uint8_t  flags;            /* 保留，置 0 */
+    uint8_t  reserved[2];
+} edge_ack;                    /* 36 B */
 
 /* ── EDGE_MSG_PING / PONG：RTT 探测 ─────────────────────────
  *
@@ -203,7 +207,7 @@ EDGE_WIRE_ASSERT(sizeof(edge_alert) == 60u, "edge_alert must be 60 B");
 EDGE_WIRE_ASSERT(sizeof(edge_image_hdr) == 46u, "edge_image_hdr must be 46 B");
 EDGE_WIRE_ASSERT(sizeof(edge_clip_manifest) == 40u, "edge_clip_manifest must be 40 B");
 EDGE_WIRE_ASSERT(sizeof(edge_clip_frag_hdr) == 20u, "edge_clip_frag_hdr must be 20 B");
-EDGE_WIRE_ASSERT(sizeof(edge_result) == 44u, "edge_result must be 44 B");
+EDGE_WIRE_ASSERT(sizeof(edge_ack) == 36u, "edge_ack must be 36 B");
 EDGE_WIRE_ASSERT(sizeof(edge_ping) == 12u, "edge_ping must be 12 B");
 
 #ifdef __cplusplus

@@ -3,6 +3,12 @@
 这是事件端（模型侧）交给控制端/传输端的接口定义：**只有定义和写端参考实现，
 没有读端、传输实现**。同批发送的还有按 RKNN 2.3.2 重转的模型 `yolov8n_232.rknn`（4.1 MB）。
 
+> **如果是从 GitHub 拉取仓库**（而不是收到压缩包），对应文件位置是：
+> `handoff/README.md`、`handoff/shm_contract.md`、`handoff/edge_wire.h`、
+> `src/edge_node/edge_shm.h`、`src/edge_node/edge_shm.py`、
+> `scripts/check_edge_shm_layout.c`、模型在 `models/rknn/yolov8n_232.rknn`。
+> 需要打包版就运行 `sh handoff/make_handoff.sh`。
+
 ---
 
 ## 1. 包里有什么
@@ -10,7 +16,7 @@
 | 文件 | 状态 | 说明 |
 |---|---|---|
 | `edge_shm.h` | **已定，只管适配** | 本机共享内存布局：Header / 记录 512 B / 事件 192 B / 帧环 |
-| `edge_wire.h` | **建议稿，待拍板** | 板端 → 远端的 UDP 报文头：告警、图片分片、片段、结果 |
+| `edge_wire.h` | **建议稿，待拍板** | 板端 → 远端的 UDP 报文头：告警、图片分片、片段、接收确认 |
 | `check_edge_shm_layout.c` | 工具 | 打印 `sizeof/offsetof`，用来核对 ABI |
 | `shm_contract.md` | 背景 | 共享内存使用说明（字段含义、读写规则、常见疑问） |
 | `reference/edge_shm.py` | 参考 | 写端实现，用来对照"写端到底保证了什么"；**读端不需要它** |
@@ -117,6 +123,9 @@ if (rec->img_slot != EDGE_IMG_SLOT_NONE && rec->img_slot < EDGE_N_IMG) {
 > 下面的问题都按**最终形态（事件驱动）**设计。
 > v1 的"每个推理帧都传"只是把策略写死成 `transmit = true`，**接口不变**——
 > 它同时也是对比实验里的"周期传输 100%"基线，所以必须和最终版本共用同一套布局。
+>
+> 另外，**远端当前不跑模型**（姿态模型经消融后暂缓，见 docs/08 §14）：它只做接收、
+> 显示、存档，回传只有 `edge_ack`。跌倒判定完全留在板端，不依赖远端判决。
 
 ### Q1. 通知机制：轮询还是门铃？
 
