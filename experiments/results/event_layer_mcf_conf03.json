@@ -1,0 +1,999 @@
+{
+  "generated_at": "2026-11-16T09:24:49.995633+00:00",
+  "script": "eval_event_layer.py",
+  "dataset": "mcf",
+  "tag": "conf03",
+  "trace_root": "data\\recordings\\event_traces\\mcf",
+  "fps": 25.0,
+  "total_frames": 15384,
+  "alarm_kinds": [
+    "FALL_CONFIRMED",
+    "PERSON_ABNORMAL",
+    "SUSPECTED_FALL",
+    "TRACK_LOST"
+  ],
+  "min_hits": 2,
+  "min_confidence": 0.3,
+  "lead_window_frames": 60,
+  "tolerance_frames": 30,
+  "counts_from_meta": {
+    "videos": 176,
+    "gt_events": 240,
+    "pred_events": 240,
+    "stream": 894
+  },
+  "alarm_kind_counts": {
+    "TRACK_LOST": 121,
+    "SUSPECTED_FALL": 16
+  },
+  "event_metrics": {
+    "n_gt": 240,
+    "n_alarm_events": 137,
+    "n_matched": 130,
+    "recall": 0.5417,
+    "precision": 0.9489,
+    "false_alarms": 7,
+    "false_alarms_per_gt": 0.0292,
+    "false_alarms_per_min": 0.6825,
+    "duplicates": 0,
+    "duplicates_per_gt": 0.0,
+    "lead_time_s_median": 0.56,
+    "lead_time_s_p10": -0.532,
+    "lead_time_s_p90": 1.12,
+    "early_lead_s_median": 0.84,
+    "late_latency_s_median": 0.68,
+    "event_duration_s_median": 0.4,
+    "total_duration_min": 10.256
+  },
+  "per_phase": {
+    "other": {
+      "frames": 744,
+      "has_event_rate": 0.9355,
+      "alarm_rate": 0.0108
+    },
+    "pre": {
+      "frames": 4880,
+      "has_event_rate": 0.6926,
+      "alarm_rate": 0.0137
+    },
+    "during": {
+      "frames": 7280,
+      "has_event_rate": 0.5357,
+      "alarm_rate": 0.038
+    },
+    "post": {
+      "frames": 2480,
+      "has_event_rate": 0.0935,
+      "alarm_rate": 0.0069
+    }
+  },
+  "per_camera": {
+    "cam1": {
+      "n_gt": 30,
+      "n_alarm_events": 18,
+      "n_matched": 17,
+      "recall": 0.5667,
+      "precision": 0.9444,
+      "false_alarms": 1,
+      "duplicates_per_gt": 0.0,
+      "lead_time_s_median": 0.56
+    },
+    "cam2": {
+      "n_gt": 30,
+      "n_alarm_events": 16,
+      "n_matched": 15,
+      "recall": 0.5,
+      "precision": 0.9375,
+      "false_alarms": 1,
+      "duplicates_per_gt": 0.0,
+      "lead_time_s_median": 0.56
+    },
+    "cam3": {
+      "n_gt": 30,
+      "n_alarm_events": 17,
+      "n_matched": 17,
+      "recall": 0.5667,
+      "precision": 1.0,
+      "false_alarms": 0,
+      "duplicates_per_gt": 0.0,
+      "lead_time_s_median": 0.56
+    },
+    "cam4": {
+      "n_gt": 30,
+      "n_alarm_events": 17,
+      "n_matched": 17,
+      "recall": 0.5667,
+      "precision": 1.0,
+      "false_alarms": 0,
+      "duplicates_per_gt": 0.0,
+      "lead_time_s_median": 0.52
+    },
+    "cam5": {
+      "n_gt": 30,
+      "n_alarm_events": 18,
+      "n_matched": 17,
+      "recall": 0.5667,
+      "precision": 0.9444,
+      "false_alarms": 1,
+      "duplicates_per_gt": 0.0,
+      "lead_time_s_median": 0.72
+    },
+    "cam6": {
+      "n_gt": 30,
+      "n_alarm_events": 14,
+      "n_matched": 14,
+      "recall": 0.4667,
+      "precision": 1.0,
+      "false_alarms": 0,
+      "duplicates_per_gt": 0.0,
+      "lead_time_s_median": 0.44
+    },
+    "cam7": {
+      "n_gt": 30,
+      "n_alarm_events": 20,
+      "n_matched": 18,
+      "recall": 0.6,
+      "precision": 0.9,
+      "false_alarms": 2,
+      "duplicates_per_gt": 0.0,
+      "lead_time_s_median": 0.62
+    },
+    "cam8": {
+      "n_gt": 30,
+      "n_alarm_events": 17,
+      "n_matched": 15,
+      "recall": 0.5,
+      "precision": 0.8824,
+      "false_alarms": 2,
+      "duplicates_per_gt": 0.0,
+      "lead_time_s_median": 0.88
+    }
+  },
+  "calibration": {
+    "with_event": {
+      "n": 8208,
+      "n_bins": 10,
+      "bin_edges": [
+        0.0,
+        0.1,
+        0.2,
+        0.3,
+        0.4,
+        0.5,
+        0.6,
+        0.7,
+        0.8,
+        0.9,
+        1.0
+      ],
+      "counts": [
+        0,
+        0,
+        341,
+        536,
+        520,
+        579,
+        906,
+        1969,
+        3237,
+        120
+      ],
+      "mean_pred": [
+        null,
+        null,
+        0.273959,
+        0.348828,
+        0.449573,
+        0.55437,
+        0.654754,
+        0.75816,
+        0.844911,
+        0.909219
+      ],
+      "frac_pos": [
+        null,
+        null,
+        0.557185,
+        0.613806,
+        0.590385,
+        0.552677,
+        0.540839,
+        0.426105,
+        0.425085,
+        0.408333
+      ],
+      "brier": 0.355563,
+      "ece": 0.303231
+    },
+    "all_frames": {
+      "n": 15384,
+      "n_bins": 10,
+      "bin_edges": [
+        0.0,
+        0.1,
+        0.2,
+        0.3,
+        0.4,
+        0.5,
+        0.6,
+        0.7,
+        0.8,
+        0.9,
+        1.0
+      ],
+      "counts": [
+        7176,
+        0,
+        341,
+        536,
+        520,
+        579,
+        906,
+        1969,
+        3237,
+        120
+      ],
+      "mean_pred": [
+        0.0,
+        null,
+        0.273959,
+        0.348828,
+        0.449573,
+        0.55437,
+        0.654754,
+        0.75816,
+        0.844911,
+        0.909219
+      ],
+      "frac_pos": [
+        0.471014,
+        null,
+        0.557185,
+        0.613806,
+        0.590385,
+        0.552677,
+        0.540839,
+        0.426105,
+        0.425085,
+        0.408333
+      ],
+      "brier": 0.409416,
+      "ece": 0.381495
+    }
+  },
+  "missed_gt": [
+    {
+      "event_id": 2,
+      "video": "chute01/cam2",
+      "start_frame": 1083,
+      "end_frame": 1113
+    },
+    {
+      "event_id": 7,
+      "video": "chute01/cam7",
+      "start_frame": 1086,
+      "end_frame": 1116
+    },
+    {
+      "event_id": 8,
+      "video": "chute01/cam8",
+      "start_frame": 1080,
+      "end_frame": 1110
+    },
+    {
+      "event_id": 21,
+      "video": "chute03/cam5",
+      "start_frame": 626,
+      "end_frame": 656
+    },
+    {
+      "event_id": 22,
+      "video": "chute03/cam6",
+      "start_frame": 611,
+      "end_frame": 641
+    },
+    {
+      "event_id": 26,
+      "video": "chute04/cam1",
+      "start_frame": 676,
+      "end_frame": 706
+    },
+    {
+      "event_id": 28,
+      "video": "chute04/cam2",
+      "start_frame": 683,
+      "end_frame": 713
+    },
+    {
+      "event_id": 30,
+      "video": "chute04/cam3",
+      "start_frame": 682,
+      "end_frame": 712
+    },
+    {
+      "event_id": 32,
+      "video": "chute04/cam4",
+      "start_frame": 604,
+      "end_frame": 634
+    },
+    {
+      "event_id": 34,
+      "video": "chute04/cam5",
+      "start_frame": 672,
+      "end_frame": 702
+    },
+    {
+      "event_id": 40,
+      "video": "chute04/cam8",
+      "start_frame": 660,
+      "end_frame": 690
+    },
+    {
+      "event_id": 42,
+      "video": "chute05/cam2",
+      "start_frame": 333,
+      "end_frame": 363
+    },
+    {
+      "event_id": 49,
+      "video": "chute06/cam1",
+      "start_frame": 583,
+      "end_frame": 602
+    },
+    {
+      "event_id": 50,
+      "video": "chute06/cam1",
+      "start_frame": 603,
+      "end_frame": 633
+    },
+    {
+      "event_id": 51,
+      "video": "chute06/cam2",
+      "start_frame": 683,
+      "end_frame": 702
+    },
+    {
+      "event_id": 52,
+      "video": "chute06/cam2",
+      "start_frame": 703,
+      "end_frame": 733
+    },
+    {
+      "event_id": 53,
+      "video": "chute06/cam3",
+      "start_frame": 689,
+      "end_frame": 708
+    },
+    {
+      "event_id": 54,
+      "video": "chute06/cam3",
+      "start_frame": 709,
+      "end_frame": 739
+    },
+    {
+      "event_id": 56,
+      "video": "chute06/cam4",
+      "start_frame": 693,
+      "end_frame": 723
+    },
+    {
+      "event_id": 58,
+      "video": "chute06/cam5",
+      "start_frame": 693,
+      "end_frame": 723
+    },
+    {
+      "event_id": 59,
+      "video": "chute06/cam6",
+      "start_frame": 686,
+      "end_frame": 705
+    },
+    {
+      "event_id": 60,
+      "video": "chute06/cam6",
+      "start_frame": 706,
+      "end_frame": 736
+    },
+    {
+      "event_id": 62,
+      "video": "chute06/cam7",
+      "start_frame": 706,
+      "end_frame": 736
+    },
+    {
+      "event_id": 63,
+      "video": "chute06/cam8",
+      "start_frame": 672,
+      "end_frame": 691
+    },
+    {
+      "event_id": 64,
+      "video": "chute06/cam8",
+      "start_frame": 692,
+      "end_frame": 722
+    },
+    {
+      "event_id": 70,
+      "video": "chute07/cam6",
+      "start_frame": 494,
+      "end_frame": 524
+    },
+    {
+      "event_id": 81,
+      "video": "chute09/cam1",
+      "start_frame": 643,
+      "end_frame": 673
+    },
+    {
+      "event_id": 82,
+      "video": "chute09/cam2",
+      "start_frame": 634,
+      "end_frame": 664
+    },
+    {
+      "event_id": 84,
+      "video": "chute09/cam4",
+      "start_frame": 643,
+      "end_frame": 673
+    },
+    {
+      "event_id": 87,
+      "video": "chute09/cam7",
+      "start_frame": 637,
+      "end_frame": 667
+    },
+    {
+      "event_id": 88,
+      "video": "chute09/cam8",
+      "start_frame": 625,
+      "end_frame": 655
+    },
+    {
+      "event_id": 106,
+      "video": "chute12/cam1",
+      "start_frame": 649,
+      "end_frame": 679
+    },
+    {
+      "event_id": 108,
+      "video": "chute12/cam2",
+      "start_frame": 634,
+      "end_frame": 664
+    },
+    {
+      "event_id": 109,
+      "video": "chute12/cam3",
+      "start_frame": 613,
+      "end_frame": 640
+    },
+    {
+      "event_id": 110,
+      "video": "chute12/cam3",
+      "start_frame": 641,
+      "end_frame": 671
+    },
+    {
+      "event_id": 111,
+      "video": "chute12/cam4",
+      "start_frame": 608,
+      "end_frame": 635
+    },
+    {
+      "event_id": 112,
+      "video": "chute12/cam4",
+      "start_frame": 636,
+      "end_frame": 666
+    },
+    {
+      "event_id": 114,
+      "video": "chute12/cam5",
+      "start_frame": 628,
+      "end_frame": 658
+    },
+    {
+      "event_id": 116,
+      "video": "chute12/cam6",
+      "start_frame": 631,
+      "end_frame": 661
+    },
+    {
+      "event_id": 118,
+      "video": "chute12/cam7",
+      "start_frame": 635,
+      "end_frame": 665
+    },
+    {
+      "event_id": 119,
+      "video": "chute12/cam8",
+      "start_frame": 600,
+      "end_frame": 627
+    },
+    {
+      "event_id": 120,
+      "video": "chute12/cam8",
+      "start_frame": 628,
+      "end_frame": 658
+    },
+    {
+      "event_id": 121,
+      "video": "chute13/cam1",
+      "start_frame": 844,
+      "end_frame": 874
+    },
+    {
+      "event_id": 123,
+      "video": "chute13/cam3",
+      "start_frame": 828,
+      "end_frame": 858
+    },
+    {
+      "event_id": 132,
+      "video": "chute14/cam4",
+      "start_frame": 991,
+      "end_frame": 1021
+    },
+    {
+      "event_id": 133,
+      "video": "chute14/cam5",
+      "start_frame": 1019,
+      "end_frame": 1049
+    },
+    {
+      "event_id": 142,
+      "video": "chute15/cam6",
+      "start_frame": 795,
+      "end_frame": 825
+    },
+    {
+      "event_id": 143,
+      "video": "chute15/cam7",
+      "start_frame": 778,
+      "end_frame": 808
+    },
+    {
+      "event_id": 146,
+      "video": "chute16/cam2",
+      "start_frame": 925,
+      "end_frame": 955
+    },
+    {
+      "event_id": 150,
+      "video": "chute16/cam6",
+      "start_frame": 905,
+      "end_frame": 935
+    },
+    {
+      "event_id": 157,
+      "video": "chute17/cam5",
+      "start_frame": 745,
+      "end_frame": 775
+    },
+    {
+      "event_id": 163,
+      "video": "chute18/cam3",
+      "start_frame": 656,
+      "end_frame": 686
+    },
+    {
+      "event_id": 166,
+      "video": "chute18/cam6",
+      "start_frame": 679,
+      "end_frame": 709
+    },
+    {
+      "event_id": 168,
+      "video": "chute18/cam8",
+      "start_frame": 648,
+      "end_frame": 678
+    },
+    {
+      "event_id": 170,
+      "video": "chute19/cam1",
+      "start_frame": 549,
+      "end_frame": 578
+    },
+    {
+      "event_id": 171,
+      "video": "chute19/cam1",
+      "start_frame": 579,
+      "end_frame": 609
+    },
+    {
+      "event_id": 173,
+      "video": "chute19/cam2",
+      "start_frame": 557,
+      "end_frame": 586
+    },
+    {
+      "event_id": 174,
+      "video": "chute19/cam2",
+      "start_frame": 587,
+      "end_frame": 617
+    },
+    {
+      "event_id": 176,
+      "video": "chute19/cam3",
+      "start_frame": 546,
+      "end_frame": 575
+    },
+    {
+      "event_id": 177,
+      "video": "chute19/cam3",
+      "start_frame": 576,
+      "end_frame": 606
+    },
+    {
+      "event_id": 179,
+      "video": "chute19/cam4",
+      "start_frame": 549,
+      "end_frame": 578
+    },
+    {
+      "event_id": 180,
+      "video": "chute19/cam4",
+      "start_frame": 579,
+      "end_frame": 609
+    },
+    {
+      "event_id": 182,
+      "video": "chute19/cam5",
+      "start_frame": 535,
+      "end_frame": 564
+    },
+    {
+      "event_id": 183,
+      "video": "chute19/cam5",
+      "start_frame": 565,
+      "end_frame": 595
+    },
+    {
+      "event_id": 184,
+      "video": "chute19/cam6",
+      "start_frame": 529,
+      "end_frame": 558
+    },
+    {
+      "event_id": 185,
+      "video": "chute19/cam6",
+      "start_frame": 559,
+      "end_frame": 588
+    },
+    {
+      "event_id": 186,
+      "video": "chute19/cam6",
+      "start_frame": 589,
+      "end_frame": 619
+    },
+    {
+      "event_id": 188,
+      "video": "chute19/cam7",
+      "start_frame": 530,
+      "end_frame": 559
+    },
+    {
+      "event_id": 189,
+      "video": "chute19/cam7",
+      "start_frame": 560,
+      "end_frame": 590
+    },
+    {
+      "event_id": 191,
+      "video": "chute19/cam8",
+      "start_frame": 550,
+      "end_frame": 579
+    },
+    {
+      "event_id": 192,
+      "video": "chute19/cam8",
+      "start_frame": 580,
+      "end_frame": 610
+    },
+    {
+      "event_id": 193,
+      "video": "chute20/cam1",
+      "start_frame": 570,
+      "end_frame": 599
+    },
+    {
+      "event_id": 194,
+      "video": "chute20/cam1",
+      "start_frame": 600,
+      "end_frame": 629
+    },
+    {
+      "event_id": 195,
+      "video": "chute20/cam1",
+      "start_frame": 630,
+      "end_frame": 659
+    },
+    {
+      "event_id": 196,
+      "video": "chute20/cam1",
+      "start_frame": 660,
+      "end_frame": 690
+    },
+    {
+      "event_id": 198,
+      "video": "chute20/cam2",
+      "start_frame": 584,
+      "end_frame": 613
+    },
+    {
+      "event_id": 199,
+      "video": "chute20/cam2",
+      "start_frame": 614,
+      "end_frame": 643
+    },
+    {
+      "event_id": 200,
+      "video": "chute20/cam2",
+      "start_frame": 644,
+      "end_frame": 674
+    },
+    {
+      "event_id": 202,
+      "video": "chute20/cam3",
+      "start_frame": 575,
+      "end_frame": 604
+    },
+    {
+      "event_id": 203,
+      "video": "chute20/cam3",
+      "start_frame": 605,
+      "end_frame": 634
+    },
+    {
+      "event_id": 204,
+      "video": "chute20/cam3",
+      "start_frame": 635,
+      "end_frame": 665
+    },
+    {
+      "event_id": 206,
+      "video": "chute20/cam4",
+      "start_frame": 585,
+      "end_frame": 614
+    },
+    {
+      "event_id": 207,
+      "video": "chute20/cam4",
+      "start_frame": 615,
+      "end_frame": 644
+    },
+    {
+      "event_id": 208,
+      "video": "chute20/cam4",
+      "start_frame": 645,
+      "end_frame": 675
+    },
+    {
+      "event_id": 210,
+      "video": "chute20/cam5",
+      "start_frame": 585,
+      "end_frame": 614
+    },
+    {
+      "event_id": 211,
+      "video": "chute20/cam5",
+      "start_frame": 615,
+      "end_frame": 644
+    },
+    {
+      "event_id": 212,
+      "video": "chute20/cam5",
+      "start_frame": 645,
+      "end_frame": 675
+    },
+    {
+      "event_id": 214,
+      "video": "chute20/cam6",
+      "start_frame": 579,
+      "end_frame": 608
+    },
+    {
+      "event_id": 215,
+      "video": "chute20/cam6",
+      "start_frame": 609,
+      "end_frame": 638
+    },
+    {
+      "event_id": 216,
+      "video": "chute20/cam6",
+      "start_frame": 639,
+      "end_frame": 669
+    },
+    {
+      "event_id": 218,
+      "video": "chute20/cam7",
+      "start_frame": 579,
+      "end_frame": 608
+    },
+    {
+      "event_id": 219,
+      "video": "chute20/cam7",
+      "start_frame": 609,
+      "end_frame": 638
+    },
+    {
+      "event_id": 220,
+      "video": "chute20/cam7",
+      "start_frame": 639,
+      "end_frame": 669
+    },
+    {
+      "event_id": 222,
+      "video": "chute20/cam8",
+      "start_frame": 575,
+      "end_frame": 604
+    },
+    {
+      "event_id": 223,
+      "video": "chute20/cam8",
+      "start_frame": 605,
+      "end_frame": 634
+    },
+    {
+      "event_id": 224,
+      "video": "chute20/cam8",
+      "start_frame": 635,
+      "end_frame": 665
+    },
+    {
+      "event_id": 226,
+      "video": "chute21/cam2",
+      "start_frame": 898,
+      "end_frame": 928
+    },
+    {
+      "event_id": 227,
+      "video": "chute21/cam3",
+      "start_frame": 890,
+      "end_frame": 920
+    },
+    {
+      "event_id": 228,
+      "video": "chute21/cam4",
+      "start_frame": 868,
+      "end_frame": 898
+    },
+    {
+      "event_id": 229,
+      "video": "chute21/cam5",
+      "start_frame": 876,
+      "end_frame": 906
+    },
+    {
+      "event_id": 230,
+      "video": "chute21/cam6",
+      "start_frame": 900,
+      "end_frame": 930
+    },
+    {
+      "event_id": 231,
+      "video": "chute21/cam7",
+      "start_frame": 900,
+      "end_frame": 930
+    },
+    {
+      "event_id": 232,
+      "video": "chute21/cam8",
+      "start_frame": 868,
+      "end_frame": 898
+    },
+    {
+      "event_id": 233,
+      "video": "chute22/cam1",
+      "start_frame": 772,
+      "end_frame": 802
+    },
+    {
+      "event_id": 234,
+      "video": "chute22/cam2",
+      "start_frame": 818,
+      "end_frame": 848
+    },
+    {
+      "event_id": 236,
+      "video": "chute22/cam4",
+      "start_frame": 813,
+      "end_frame": 843
+    },
+    {
+      "event_id": 237,
+      "video": "chute22/cam5",
+      "start_frame": 825,
+      "end_frame": 855
+    },
+    {
+      "event_id": 238,
+      "video": "chute22/cam6",
+      "start_frame": 818,
+      "end_frame": 848
+    },
+    {
+      "event_id": 239,
+      "video": "chute22/cam7",
+      "start_frame": 818,
+      "end_frame": 848
+    },
+    {
+      "event_id": 240,
+      "video": "chute22/cam8",
+      "start_frame": 806,
+      "end_frame": 836
+    }
+  ],
+  "false_alarms": [
+    {
+      "event_id": 2,
+      "video": "chute10/cam5",
+      "kind": "TRACK_LOST",
+      "start_frame": 564,
+      "alarm_start_frame": 565,
+      "alarm_confidence": 0.45,
+      "end_frame": 578,
+      "hits": 3
+    },
+    {
+      "event_id": 1,
+      "video": "chute20/cam7",
+      "kind": "TRACK_LOST",
+      "start_frame": 354,
+      "alarm_start_frame": 378,
+      "alarm_confidence": 0.346291,
+      "end_frame": 380,
+      "hits": 26
+    },
+    {
+      "event_id": 1,
+      "video": "chute20/cam8",
+      "kind": "TRACK_LOST",
+      "start_frame": 350,
+      "alarm_start_frame": 379,
+      "alarm_confidence": 0.650348,
+      "end_frame": 430,
+      "hits": 40
+    },
+    {
+      "event_id": 1,
+      "video": "chute21/cam1",
+      "kind": "TRACK_LOST",
+      "start_frame": 558,
+      "alarm_start_frame": 573,
+      "alarm_confidence": 0.321912,
+      "end_frame": 588,
+      "hits": 29
+    },
+    {
+      "event_id": 1,
+      "video": "chute21/cam2",
+      "kind": "TRACK_LOST",
+      "start_frame": 568,
+      "alarm_start_frame": 593,
+      "alarm_confidence": 0.828959,
+      "end_frame": 593,
+      "hits": 25
+    },
+    {
+      "event_id": 1,
+      "video": "chute21/cam7",
+      "kind": "TRACK_LOST",
+      "start_frame": 570,
+      "alarm_start_frame": 583,
+      "alarm_confidence": 0.544066,
+      "end_frame": 586,
+      "hits": 17
+    },
+    {
+      "event_id": 1,
+      "video": "chute21/cam8",
+      "kind": "TRACK_LOST",
+      "start_frame": 538,
+      "alarm_start_frame": 545,
+      "alarm_confidence": 0.337407,
+      "end_frame": 567,
+      "hits": 21
+    }
+  ],
+  "notes": "事件级口径；false_alarms_per_min 的分母是轨迹里出现的帧数（MCF 只含标注区间，不是完整视频时长）。calibration 是逐帧 confidence 对 gt_label 的代理校准，不是 urgency 概率。"
+}

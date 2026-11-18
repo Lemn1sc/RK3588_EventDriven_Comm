@@ -39,6 +39,14 @@ DEFAULT_CALIB = ROOT / "models" / "rknn" / "calib"
 DEFAULT_OUT = ROOT / "models" / "rknn"
 
 
+def show_path(p: Path) -> str:
+    """尽量显示相对仓库的路径；--out 传相对路径时不至于崩溃。"""
+    try:
+        return str(p.relative_to(ROOT))
+    except ValueError:
+        return str(p)
+
+
 def list_calib(calib_dir: Path, limit: int | None) -> list[Path]:
     imgs = sorted(p for p in calib_dir.glob("*.jpg"))
     if not imgs:
@@ -68,7 +76,10 @@ def build_rknn(onnx: Path, imgs: list[Path], out: Path, target: str,
         raise SystemExit(
             "没装 rknn-toolkit2。注意它**只有 Linux 版**：\n"
             "    pip install rknn-toolkit2\n"
-            "  版本必须与板端 NPU 驱动匹配（板子到手先 `cat /proc/rknpu/version`）。\n"
+            "  版本必须与板端 **librknnrt** 匹配：\n"
+            "    板端 `strings /usr/lib/librknnrt.so | grep -i version`\n"
+            "    RKNPU 驱动看 `/sys/kernel/debug/rknpu/version`"
+            "（`/proc/rknpu/version` 可能不存在）。\n"
             f"  （原始错误：{e}）"
         )
 
@@ -80,7 +91,8 @@ def build_rknn(onnx: Path, imgs: list[Path], out: Path, target: str,
         mean_values=[[0, 0, 0]],
         std_values=[[255, 255, 255]],
         target_platform=target,
-        quantized_dtype="asymmetric_quantized-8",
+        # 2.x 用 w8a8；1.5.x 的写法是 asymmetric_quantized-8。
+        quantized_dtype="w8a8",
         optimization_level=3,
     )
     print(f"  load_onnx: {onnx.name}")
@@ -94,7 +106,7 @@ def build_rknn(onnx: Path, imgs: list[Path], out: Path, target: str,
     out.parent.mkdir(parents=True, exist_ok=True)
     if rknn.export_rknn(str(out)) != 0:
         raise SystemExit("export_rknn 失败")
-    print(f"  导出: {out.relative_to(ROOT)}  ({out.stat().st_size / 2**20:.1f} MB)")
+    print(f"  导出: {show_path(out)}  ({out.stat().st_size / 2**20:.1f} MB)")
     return rknn
 
 
@@ -178,7 +190,8 @@ def decode(outs, conf_thres=0.25):
     B = np.concatenate(boxes); C = np.concatenate(confs); K = np.concatenate(clss)
     keep = []
     import cv2
-    for i in cv2.dnn.NMSBoxes(B.tolist(), C.tolist(), conf_thres, 0.7):
+    nms_boxes = np.stack([B[:, 0], B[:, 1], B[:, 2] - B[:, 0], B[:, 3] - B[:, 1]], 1)
+    for i in cv2.dnn.NMSBoxes(nms_boxes.tolist(), C.tolist(), conf_thres, 0.7):
         keep.append(int(i))
     return B[keep], C[keep], K[keep]
 
@@ -303,7 +316,7 @@ def main() -> None:
     if not args.skip_verify:
         verify(rknn, args.onnx, imgs)
     rknn.release()
-    print(f"\n完成 → {args.out.relative_to(ROOT)}")
+    print(f"\n完成 → {show_path(args.out)}")
 
 
 if __name__ == "__main__":

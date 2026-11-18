@@ -1,0 +1,558 @@
+{
+  "generated_at": "2026-11-16T10:28:44.402462+00:00",
+  "script": "eval_event_layer.py",
+  "dataset": "urfd",
+  "tag": "",
+  "trace_root": "data\\recordings\\event_traces\\urfd",
+  "fps": 30.0,
+  "total_frames": 11936,
+  "alarm_kinds": [
+    "FALL_CONFIRMED",
+    "PERSON_ABNORMAL",
+    "SUSPECTED_FALL",
+    "TRACK_LOST"
+  ],
+  "min_hits": 2,
+  "min_confidence": 0.0,
+  "lead_window_frames": 60,
+  "tolerance_frames": 30,
+  "counts_from_meta": {
+    "videos": 70,
+    "gt_events": 30,
+    "pred_events": 86,
+    "stream": 337
+  },
+  "alarm_kind_counts": {
+    "TRACK_LOST": 30,
+    "SUSPECTED_FALL": 36
+  },
+  "event_metrics": {
+    "n_gt": 30,
+    "n_alarm_events": 66,
+    "n_matched": 30,
+    "recall": 1.0,
+    "precision": 0.4545,
+    "false_alarms": 36,
+    "false_alarms_per_gt": 1.2,
+    "false_alarms_per_min": 5.429,
+    "duplicates": 4,
+    "duplicates_per_gt": 0.1333,
+    "lead_time_s_median": 0.7167,
+    "lead_time_s_p10": 0.6,
+    "lead_time_s_p90": 1.0367,
+    "early_lead_s_median": null,
+    "late_latency_s_median": 0.7167,
+    "event_duration_s_median": 0.9667,
+    "total_duration_min": 6.6311
+  },
+  "per_phase": {
+    "other": {
+      "frames": 8941,
+      "has_event_rate": 0.741,
+      "alarm_rate": 0.0123
+    },
+    "pre": {
+      "frames": 1192,
+      "has_event_rate": 1.0,
+      "alarm_rate": 0.0
+    },
+    "during": {
+      "frames": 900,
+      "has_event_rate": 0.9067,
+      "alarm_rate": 0.1178
+    },
+    "post": {
+      "frames": 903,
+      "has_event_rate": 0.6855,
+      "alarm_rate": 0.5327
+    }
+  },
+  "per_camera": {
+    "cam0": {
+      "n_gt": 30,
+      "n_alarm_events": 66,
+      "n_matched": 30,
+      "recall": 1.0,
+      "precision": 0.4545,
+      "false_alarms": 36,
+      "duplicates_per_gt": 0.1333,
+      "lead_time_s_median": 0.7167
+    }
+  },
+  "calibration": {
+    "with_event": {
+      "n": 9252,
+      "n_bins": 10,
+      "bin_edges": [
+        0.0,
+        0.1,
+        0.2,
+        0.3,
+        0.4,
+        0.5,
+        0.6,
+        0.7,
+        0.8,
+        0.9,
+        1.0
+      ],
+      "counts": [
+        0,
+        0,
+        220,
+        397,
+        384,
+        435,
+        476,
+        645,
+        3966,
+        2729
+      ],
+      "mean_pred": [
+        null,
+        null,
+        0.27516,
+        0.349433,
+        0.448079,
+        0.552345,
+        0.651844,
+        0.754487,
+        0.868701,
+        0.916325
+      ],
+      "frac_pos": [
+        null,
+        null,
+        0.377273,
+        0.36272,
+        0.276042,
+        0.250575,
+        0.216387,
+        0.217054,
+        0.112456,
+        0.111396
+      ],
+      "brier": 0.5983,
+      "ece": 0.645797
+    },
+    "all_frames": {
+      "n": 11936,
+      "n_bins": 10,
+      "bin_edges": [
+        0.0,
+        0.1,
+        0.2,
+        0.3,
+        0.4,
+        0.5,
+        0.6,
+        0.7,
+        0.8,
+        0.9,
+        1.0
+      ],
+      "counts": [
+        2684,
+        0,
+        220,
+        397,
+        384,
+        435,
+        476,
+        645,
+        3966,
+        2729
+      ],
+      "mean_pred": [
+        0.0,
+        null,
+        0.27516,
+        0.349433,
+        0.448079,
+        0.552345,
+        0.651844,
+        0.754487,
+        0.868701,
+        0.916325
+      ],
+      "frac_pos": [
+        0.137109,
+        null,
+        0.377273,
+        0.36272,
+        0.276042,
+        0.250575,
+        0.216387,
+        0.217054,
+        0.112456,
+        0.111396
+      ],
+      "brier": 0.494594,
+      "ece": 0.53141
+    }
+  },
+  "missed_gt": [],
+  "false_alarms": [
+    {
+      "event_id": 1,
+      "video": "adl/adl-01-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 7,
+      "alarm_start_frame": 144,
+      "alarm_confidence": 0.490595,
+      "end_frame": 149,
+      "hits": 143
+    },
+    {
+      "event_id": 1,
+      "video": "adl/adl-02-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 32,
+      "alarm_start_frame": 148,
+      "alarm_confidence": 1.0,
+      "end_frame": 179,
+      "hits": 143
+    },
+    {
+      "event_id": 1,
+      "video": "adl/adl-10-cam0.mp4",
+      "kind": "SUSPECTED_FALL",
+      "start_frame": 1,
+      "alarm_start_frame": 143,
+      "alarm_confidence": 0.828194,
+      "end_frame": 299,
+      "hits": 299
+    },
+    {
+      "event_id": 1,
+      "video": "adl/adl-11-cam0.mp4",
+      "kind": "SUSPECTED_FALL",
+      "start_frame": 2,
+      "alarm_start_frame": 228,
+      "alarm_confidence": 0.811274,
+      "end_frame": 299,
+      "hits": 290
+    },
+    {
+      "event_id": 1,
+      "video": "adl/adl-12-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 20,
+      "alarm_start_frame": 35,
+      "alarm_confidence": 0.250287,
+      "end_frame": 249,
+      "hits": 191
+    },
+    {
+      "event_id": 1,
+      "video": "adl/adl-13-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 47,
+      "alarm_start_frame": 204,
+      "alarm_confidence": 0.984005,
+      "end_frame": 264,
+      "hits": 201
+    },
+    {
+      "event_id": 1,
+      "video": "adl/adl-15-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 35,
+      "alarm_start_frame": 71,
+      "alarm_confidence": 0.294481,
+      "end_frame": 274,
+      "hits": 213
+    },
+    {
+      "event_id": 1,
+      "video": "adl/adl-16-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 30,
+      "alarm_start_frame": 36,
+      "alarm_confidence": 0.378527,
+      "end_frame": 151,
+      "hits": 93
+    },
+    {
+      "event_id": 1,
+      "video": "adl/adl-17-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 28,
+      "alarm_start_frame": 44,
+      "alarm_confidence": 0.270682,
+      "end_frame": 229,
+      "hits": 177
+    },
+    {
+      "event_id": 1,
+      "video": "adl/adl-18-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 63,
+      "alarm_start_frame": 238,
+      "alarm_confidence": 0.25,
+      "end_frame": 251,
+      "hits": 155
+    },
+    {
+      "event_id": 1,
+      "video": "adl/adl-19-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 59,
+      "alarm_start_frame": 75,
+      "alarm_confidence": 0.472499,
+      "end_frame": 249,
+      "hits": 169
+    },
+    {
+      "event_id": 1,
+      "video": "adl/adl-20-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 40,
+      "alarm_start_frame": 48,
+      "alarm_confidence": 0.290532,
+      "end_frame": 263,
+      "hits": 184
+    },
+    {
+      "event_id": 1,
+      "video": "adl/adl-21-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 35,
+      "alarm_start_frame": 176,
+      "alarm_confidence": 0.7,
+      "end_frame": 217,
+      "hits": 155
+    },
+    {
+      "event_id": 1,
+      "video": "adl/adl-22-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 19,
+      "alarm_start_frame": 138,
+      "alarm_confidence": 0.626681,
+      "end_frame": 161,
+      "hits": 111
+    },
+    {
+      "event_id": 1,
+      "video": "adl/adl-23-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 3,
+      "alarm_start_frame": 35,
+      "alarm_confidence": 0.262497,
+      "end_frame": 166,
+      "hits": 112
+    },
+    {
+      "event_id": 1,
+      "video": "adl/adl-27-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 0,
+      "alarm_start_frame": 55,
+      "alarm_confidence": 0.787298,
+      "end_frame": 99,
+      "hits": 96
+    },
+    {
+      "event_id": 1,
+      "video": "adl/adl-30-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 35,
+      "alarm_start_frame": 180,
+      "alarm_confidence": 0.9,
+      "end_frame": 333,
+      "hits": 229
+    },
+    {
+      "event_id": 2,
+      "video": "adl/adl-30-cam0.mp4",
+      "kind": "SUSPECTED_FALL",
+      "start_frame": 336,
+      "alarm_start_frame": 352,
+      "alarm_confidence": 0.15,
+      "end_frame": 399,
+      "hits": 63
+    },
+    {
+      "event_id": 1,
+      "video": "adl/adl-31-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 0,
+      "alarm_start_frame": 81,
+      "alarm_confidence": 0.866282,
+      "end_frame": 137,
+      "hits": 96
+    },
+    {
+      "event_id": 2,
+      "video": "adl/adl-31-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 225,
+      "alarm_start_frame": 231,
+      "alarm_confidence": 0.19286,
+      "end_frame": 249,
+      "hits": 21
+    },
+    {
+      "event_id": 1,
+      "video": "adl/adl-32-cam0.mp4",
+      "kind": "SUSPECTED_FALL",
+      "start_frame": 0,
+      "alarm_start_frame": 87,
+      "alarm_confidence": 0.9,
+      "end_frame": 199,
+      "hits": 140
+    },
+    {
+      "event_id": 1,
+      "video": "adl/adl-33-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 0,
+      "alarm_start_frame": 91,
+      "alarm_confidence": 0.9,
+      "end_frame": 123,
+      "hits": 113
+    },
+    {
+      "event_id": 1,
+      "video": "adl/adl-34-cam0.mp4",
+      "kind": "SUSPECTED_FALL",
+      "start_frame": 0,
+      "alarm_start_frame": 43,
+      "alarm_confidence": 0.9,
+      "end_frame": 190,
+      "hits": 146
+    },
+    {
+      "event_id": 1,
+      "video": "adl/adl-35-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 0,
+      "alarm_start_frame": 42,
+      "alarm_confidence": 1.0,
+      "end_frame": 100,
+      "hits": 87
+    },
+    {
+      "event_id": 2,
+      "video": "adl/adl-35-cam0.mp4",
+      "kind": "SUSPECTED_FALL",
+      "start_frame": 171,
+      "alarm_start_frame": 174,
+      "alarm_confidence": 0.744534,
+      "end_frame": 279,
+      "hits": 85
+    },
+    {
+      "event_id": 1,
+      "video": "adl/adl-36-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 23,
+      "alarm_start_frame": 241,
+      "alarm_confidence": 0.7,
+      "end_frame": 285,
+      "hits": 225
+    },
+    {
+      "event_id": 2,
+      "video": "adl/adl-36-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 324,
+      "alarm_start_frame": 330,
+      "alarm_confidence": 0.255649,
+      "end_frame": 330,
+      "hits": 7
+    },
+    {
+      "event_id": 1,
+      "video": "adl/adl-37-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 29,
+      "alarm_start_frame": 276,
+      "alarm_confidence": 0.743875,
+      "end_frame": 329,
+      "hits": 300
+    },
+    {
+      "event_id": 2,
+      "video": "adl/adl-37-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 330,
+      "alarm_start_frame": 345,
+      "alarm_confidence": 0.252627,
+      "end_frame": 349,
+      "hits": 20
+    },
+    {
+      "event_id": 1,
+      "video": "adl/adl-38-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 22,
+      "alarm_start_frame": 151,
+      "alarm_confidence": 1.0,
+      "end_frame": 271,
+      "hits": 166
+    },
+    {
+      "event_id": 1,
+      "video": "adl/adl-39-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 22,
+      "alarm_start_frame": 166,
+      "alarm_confidence": 0.851839,
+      "end_frame": 194,
+      "hits": 148
+    },
+    {
+      "event_id": 1,
+      "video": "adl/adl-40-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 50,
+      "alarm_start_frame": 217,
+      "alarm_confidence": 0.691157,
+      "end_frame": 222,
+      "hits": 170
+    },
+    {
+      "event_id": 1,
+      "video": "fall/fall-01-cam0.mp4",
+      "kind": "SUSPECTED_FALL",
+      "start_frame": 0,
+      "alarm_start_frame": 111,
+      "alarm_confidence": 0.9,
+      "end_frame": 116,
+      "hits": 114
+    },
+    {
+      "event_id": 1,
+      "video": "fall/fall-18-cam0.mp4",
+      "kind": "TRACK_LOST",
+      "start_frame": 0,
+      "alarm_start_frame": 33,
+      "alarm_confidence": 0.806631,
+      "end_frame": 37,
+      "hits": 35
+    },
+    {
+      "event_id": 2,
+      "video": "fall/fall-22-cam0.mp4",
+      "kind": "SUSPECTED_FALL",
+      "start_frame": 44,
+      "alarm_start_frame": 44,
+      "alarm_confidence": 0.2746,
+      "end_frame": 45,
+      "hits": 2
+    },
+    {
+      "event_id": 2,
+      "video": "fall/fall-26-cam0.mp4",
+      "kind": "SUSPECTED_FALL",
+      "start_frame": 51,
+      "alarm_start_frame": 51,
+      "alarm_confidence": 0.32897,
+      "end_frame": 60,
+      "hits": 7
+    }
+  ],
+  "notes": "事件级口径；false_alarms_per_min 的分母是轨迹里出现的帧数（MCF 只含标注区间，不是完整视频时长）。calibration 是逐帧 confidence 对 gt_label 的代理校准，不是 urgency 概率。"
+}

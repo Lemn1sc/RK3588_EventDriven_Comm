@@ -3,9 +3,12 @@ models/pt/*
 models/onnx/*
 models/rknn/*
 # 例外：RKNN 转换产物随代码发布 —— 板上部署直接用它，别人 clone 后也能
-# 立刻验证/部署，不必先装 rknn-toolkit2 重转一遍。5.4 MB，可接受。
-# 它可由 models/onnx/yolov8n.onnx + calib/ + convert_to_rknn.py 完整重建。
+# 立刻验证/部署，不必先装 rknn-toolkit2 重转一遍。
+# - yolov8n.rknn:     1.5.2 旧模型（Buildroot 时代，保留对照）
+# - yolov8n_232.rknn: 2.3.2 新模型（Debian 12 / librknnrt 2.3.2）
+# 两者都可由 models/onnx/yolov8n.onnx + calib/ + convert_to_rknn.py 重建。
 !models/rknn/yolov8n.rknn
+!models/rknn/yolov8n_232.rknn
 !models/**/.gitkeep
 data/datasets/*
 data/recordings/*
@@ -26,6 +29,11 @@ vm_share/to_vm/*
 vm_share/from_vm/*
 !vm_share/README.md
 !vm_share/**/.gitkeep
+
+# 板端部署包：wheel 和压缩包体积大，不入库
+deploy/wheels/
+deploy/pkg/
+deploy/*.tar.gz
 
 # Python
 __pycache__/
