@@ -35,6 +35,10 @@ deploy/wheels/
 deploy/pkg/
 deploy/*.tar.gz
 
+# 交接包：pkg/ 和 tar.gz 是生成物；源文件（README/edge_wire.h/脚本）入库
+handoff/pkg/
+handoff/*.tar.gz
+
 # Python
 __pycache__/
 *.py[cod]

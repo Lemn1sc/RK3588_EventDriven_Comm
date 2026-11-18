@@ -32,6 +32,7 @@
 | **11-16** | **事件层（T0.10）：事件形成 + 轨迹 + 事件级评测 + 载荷；`TRACK_LOST` 运动评分** | MCF 强告警召回 8.8% → `TRACK_LOST` 67.9%；conf≥0.30 时 54.2%/94.9% |
 | **11-16** | **板端部署首测：RKNN load/init/infer + 摄像头共享内存 + 端到端闭环** | 65.6 ms/帧（15.2 FPS）；100 帧 0 bad；检测画面置信度偏低，方向/颜色待确认 |
 | **11-17** | **板子重装 Debian 12 + 模型按 2.3.2 重转** | kernel 6.1.141 / `librknnrt` 2.3.2 / RKNPU 0.9.8；`yolov8n_232.rknn` **4.1 MB**，simulator IoU **0.973~0.992** |
+| **11-18** | **模型 ↔ 传输共享内存契约（docs/10）+ 参考实现** | 逐帧记录 **512 B** 固定结构 + 16 槽事件表 + 8 槽 BGR 帧环（7.07 MiB）；`flock` 保护、偏移冻结；JPEG 编码归传输端（模型进程 CPU 已饱和）。交付物：`edge_shm.py`（写端）+ **`edge_shm.h`（C11，给读端 include）**；`check_edge_shm.py` 用 gcc 做跨语言布局比对，全部通过。另出**交接包** `handoff/`（README + `edge_wire.h` 线上报文建议稿 + 布局探针），`sh handoff/make_handoff.sh` 生成 tar.gz |
 
 ---
 
