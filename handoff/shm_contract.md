@@ -235,77 +235,31 @@ A 正在疑似跌倒，B 只是正常经过。所以另有一张 16 槽的事件
 
 存的是**原始 BGR**，不是 NV12、不是 JPEG。写端已经转好了，你们直接裁 ROI 就能编码。
 
-取图的正确顺序：
+用记录里的 `img_slot` 定位槽位，再用槽头的 `frame_id` 校验：
 
-```c
-const edge_frame_record *rec =
-    (const edge_frame_record *)(base + edge_rec_offset(hdr->pub_seq));
-
-if (rec->img_slot != EDGE_IMG_SLOT_NONE && rec->img_slot < EDGE_N_IMG) {
-    uint64_t off = edge_img_offset(rec->img_slot);
-    const edge_image_meta *meta = (const edge_image_meta *)(base + off);
-
-    if (meta->frame_id == rec->frame_id) {          /* 图还在 */
-        const uint8_t *bgr = base + off + sizeof(edge_image_meta);
-        /* 裁 ROI → JPEG → 发送 */
-    } else {
-        /* 图已经被 8 帧之后的内容覆盖了 */
-    }
-}
-```
-
-`img_slot` 只负责**定位**，`frame_id` 才负责**校验**。只按槽位读会读到别人的图——
-8 个槽在 15 fps 下只能撑 0.5 秒。
-
-图被覆盖时怎么办？两个选择：退回帧环里最新的一帧，或者这一次不发图。
-记录本身永远有效，事件、框、置信度都还在。
+- `img_slot` 只负责**定位**，`frame_id` 才负责**校验**；
+- 不校验就可能读到别人的图——8 个槽在 15 fps 下只能撑 0.5 秒；
+- 被覆盖时，退到最新帧或者这次不发图都行，记录本身仍然有效。
 
 ---
 
-## 8. 读写规则
+## 8. 同步（建议）
 
-### 8.1 锁
+写端发布时用 `flock` 包住"图 → 记录 → 序号"这一小段，不到 1 ms，从不等待读端。
+读端怎么等新数据、用什么锁，由你们决定；两边要对齐的只有两点：
 
-写端每次发布、读端每次读取，都要拿 `flock("/tmp/edge_infer.lock")`。
-写端持锁不到 1 毫秒，你们那边只要别在锁里做 JPEG 编码就行——
-需要慢操作时，先把记录和图像拷到本地缓冲，再解锁处理。
+1. **互斥机制一致**——否则可能读到撕裂的快照；
+2. **发布顺序**——`pub_seq` 变成 n 时，第 n 条记录和它指向的图已经完整。
 
-### 8.2 轮询
+读的时候可能遇到：
 
-```c
-uint64_t last = 0;
-for (;;) {
-    edge_frame_record rec;
-    uint64_t n;
+| 现象 | 含义 |
+|---|---|
+| `pub_seq` 没变 | 没有新数据 |
+| 跳过多条 | 中间漏了；超过 64 条说明已被覆盖 |
+| `rec.seq` 对不上 | 刚被覆盖，丢弃重来 |
 
-    lock();
-    n = hdr->pub_seq;
-    if (n > last) {
-        uint64_t s = last + 1;
-        if (n - s >= EDGE_N_REC) {          /* 中间的被覆盖了，只能从最新附近开始 */
-            s = n - EDGE_N_REC + 1;
-        }
-        memcpy(&rec, base + edge_rec_offset(s), sizeof rec);
-        unlock();
-
-        if (rec.seq == s) {                 /* 还是这条，可以放心用 */
-            handle(&rec);                   /* 编码之类的慢操作放在锁外 */
-            last = s;
-        } else {
-            last = n;                       /* 连 s 都被覆盖了，跳到最新 */
-        }
-    } else {
-        unlock();
-        usleep(1000);
-    }
-}
-```
-
-- `n - last > 1`：中间漏了几条（读端被调度阻塞了，或者写端跑得快）。
-- `n - last > 64`：漏掉的那些已经被覆盖，只能从最新的附近开始。
-- 每次拿到的记录都要核对 `seq`，这是"我读到的还是这条吗"的唯一证据。
-
-轮询间隔 1 毫秒就够了。单帧推理本身 68 毫秒，晚 1 毫秒没有意义。
+轮询间隔 1 ms 足够（单帧推理本身 68 ms）；换成门铃也可以，只要保证上面两点。
 
 ---
 
