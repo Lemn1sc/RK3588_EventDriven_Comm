@@ -13,9 +13,25 @@ check_board_env.sh              板端环境自检（只读）
 board_check_rknn.py             模型 load/init/infer/延迟自检
 board_decode_yolo.py            DFL 解码 + NMS + 画框
 board_camera_edge.py            摄像头共享内存 → RKNN → 画框
+demo_edge_shm.py                无摄像头共享内存发布演示 / 显式清理残留
+src/edge_node/                  发布器、布局及包初始化所需模块
+src/common/                     检测事件向量及包初始化所需模块
 yolov8n_232.rknn                按 rknn-toolkit2 2.3.2 重转的模型
 bus.jpg                         模型测试图
 wheels/                         板端 rknnlite wheel（及可选 numpy wheel）
+```
+
+2026-11-21：摄像头脚本新增 `--publish-shm`，用于发布旋转后 480×640 的原始 BGR
+及检测记录，配合 `Wifi_Send --shm` 读取。复制脚本到板子时必须同时复制上述 `src/`，
+不能只替换一个 Python 文件。完整仓库运行和部署包平铺运行均可定位本地 `src/`。
+真实图像的 WiFi 编码发送、事件跟踪仍待下一阶段。
+
+部署包内运行示例（先启动 `cameraApp 640 480 1000`）：
+
+```bash
+python3 board_camera_edge.py --model yolov8n_232.rknn --stride 2 --save-every 0 --publish-shm
+# 另一终端，在输出共享内存创建后执行：
+./Wifi_Send --shm
 ```
 
 ## 0. 先跑环境自检

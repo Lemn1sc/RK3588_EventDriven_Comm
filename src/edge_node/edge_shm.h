@@ -78,6 +78,7 @@ extern "C" {
 /* ── flags 位 ─────────────────────────────────────────────────── */
 
 #define EDGE_MODEL_READY   (1u << 0)   /* header.flags */
+#define EDGE_MODEL_EXITED  (1u << 1)   /* 正常释放/退出，读端可读完末条记录后退出 */
 
 #define EDGE_FRAME_INFERRED      (1u << 0)   /* 本帧成功推理 */
 #define EDGE_FRAME_BAD           (1u << 1)   /* 解码/推理失败，其余字段无效 */

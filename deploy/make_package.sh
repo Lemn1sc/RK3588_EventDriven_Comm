@@ -20,11 +20,21 @@ fi
 
 rm -rf "$PKG"
 mkdir -p "$PKG/wheels"
+mkdir -p "$PKG/src/edge_node" "$PKG/src/common"
 
 cp "$ROOT/deploy/README_board.md" "$ROOT/deploy/check_board_env.sh" "$PKG/"
 cp "$ROOT/scripts/board_check_rknn.py" \
    "$ROOT/scripts/board_decode_yolo.py" \
-   "$ROOT/scripts/board_camera_edge.py" "$PKG/"
+   "$ROOT/scripts/board_camera_edge.py" \
+   "$ROOT/scripts/demo_edge_shm.py" "$PKG/"
+cp "$ROOT/src/edge_node/__init__.py" \
+   "$ROOT/src/edge_node/event_tracker.py" \
+   "$ROOT/src/edge_node/edge_shm.py" \
+   "$ROOT/src/edge_node/edge_shm.h" \
+   "$ROOT/src/edge_node/shm_publisher.py" "$PKG/src/edge_node/"
+cp "$ROOT/src/common/__init__.py" \
+   "$ROOT/src/common/event_vector.py" \
+   "$ROOT/src/common/calibration.py" "$PKG/src/common/"
 cp "$MODEL" "$PKG/"
 cp "$BUS" "$PKG/bus.jpg"
 cp "$WHEEL_DIR"/*.whl "$PKG/wheels/"
